@@ -43,12 +43,6 @@ const MODES: readonly SelectableMode[] = [
     label: "Time Attack",
     description: "Race the clock. Every right answer buys more time.",
   },
-  {
-    id: "pvp",
-    label: "PvP",
-    description: "Challenge another player. Coming soon.",
-    comingSoon: true,
-  },
 ];
 
 /** Domain pre-selected on the initial visit so categories are visible immediately. */
@@ -394,20 +388,32 @@ export default function HomeSetup({ catalog }: HomeSetupProps) {
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {MODES.map((mode) => {
               const compatible =
-                !selectedCategory ||
-                mode.id === "pvp" ||
-                selectedCategory.compatibleModes.includes(mode.id);
-              const playableMode = mode.id === "pvp" ? null : mode.id;
+                !selectedCategory || selectedCategory.compatibleModes.includes(mode.id);
               return (
                 <ModeButton
                   key={mode.id}
                   mode={mode}
-                  selected={selectedMode === playableMode}
+                  selected={selectedMode === mode.id}
                   disabled={!compatible}
-                  onSelect={() => playableMode && setSelectedMode(playableMode)}
+                  onSelect={() => setSelectedMode(mode.id)}
                 />
               );
             })}
+            <Link
+              href="/multiplayer"
+              className="group relative grid min-h-28 w-full grid-cols-[auto_1fr] items-start gap-x-3 gap-y-2 p-3 text-left transition-transform duration-[140ms] ease-out hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--focus-ring)] sm:min-h-32 sm:p-4"
+            >
+              <span
+                aria-hidden="true"
+                className="col-start-1 row-start-1 flex size-4 shrink-0 items-center justify-center self-center rounded-full border-2 border-white transition-colors duration-[140ms] group-hover:border-[var(--accent-classic)]"
+              />
+              <span className="col-start-2 row-start-1 text-2xl font-bold leading-tight text-white transition-[text-shadow] sm:text-4xl group-hover:[text-shadow:3px_3px_0_var(--accent-classic)] group-focus-visible:[text-shadow:2px_2px_0_var(--accent-classic)]">
+                Multiplayer
+              </span>
+              <span className="col-start-2 row-start-2 text-sm leading-relaxed text-[var(--foreground-muted)] sm:text-base">
+                Create a room or join a match with friends.
+              </span>
+            </Link>
           </div>
         </section>
 

@@ -8,6 +8,7 @@ import {
 } from "./types";
 
 const DEPLOYED_API_BASE_URL = "https://higherorlower-api.onrender.com/api/v1";
+const CATEGORIES_REQUEST_TIMEOUT_MS = 15_000;
 
 /** The handoff documents the deployed endpoint; local API URLs are caller-configured. */
 export function getApiBaseUrl(): string {
@@ -92,7 +93,8 @@ async function request<T>(path: string, init: RequestInit, parse: (body: unknown
   try {
     const headers = new Headers(init.headers);
     headers.set("Accept", "application/json");
-    response = await fetch(`${getApiBaseUrl()}${path}`, {
+    const url = path.startsWith("/api/backend/") ? path : `${getApiBaseUrl()}${path}`;
+    response = await fetch(url, {
       ...init,
       headers,
     });
@@ -121,7 +123,15 @@ async function request<T>(path: string, init: RequestInit, parse: (body: unknown
 }
 
 export function fetchCategories(options?: { signal?: AbortSignal }): Promise<CategoryPage> {
-  return request("/categories", { method: "GET", cache: "no-store", signal: options?.signal }, parseCategoryPage);
+  const timeoutSignal = AbortSignal.timeout(CATEGORIES_REQUEST_TIMEOUT_MS);
+  const signal = options?.signal
+    ? AbortSignal.any([options.signal, timeoutSignal])
+    : timeoutSignal;
+  // Browser requests go through a same-origin Next route because the hosted API
+  // CORS allowlist may not yet include this Vercel project's generated domain.
+  // Server-rendered pages call the API directly and retain their local fallback.
+  const path = typeof window === "undefined" ? "/categories" : "/api/backend/categories";
+  return request(path, { method: "GET", cache: "no-store", signal }, parseCategoryPage);
 }
 
 function validateNickname(nickname: string): string {
