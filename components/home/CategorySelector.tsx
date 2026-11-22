@@ -1,6 +1,6 @@
 "use client";
 
-import { motion, useReducedMotion } from "motion/react";
+import { useReducedMotion } from "motion/react";
 import { useLayoutEffect, useRef } from "react";
 import type { PublicProductionCategory } from "@/lib/catalog/availability";
 import CategoryCard from "@/components/CategoryCard";
@@ -84,19 +84,17 @@ export default function CategorySelector({
         Choose a category
       </h2>
       <div ref={containerRef}>
-        <motion.div
-          key={domainKey}
-          initial={{ opacity: 0, transform: prefersReducedMotion ? "none" : "translateY(1px)" }}
-          animate={{ opacity: 1, transform: "translateY(0px)" }}
-          transition={{ duration: prefersReducedMotion ? 0.01 : 0.18, ease: [0.23, 1, 0.32, 1] }}
-        >
+        {/* The row cascade replaces the old container fade: it lives inside the
+            `key={domainKey}` remount so a domain switch replays it, and it never
+            stacks a second animation on the existing height interpolation. */}
+        <div key={domainKey}>
             {categories.length === 0 ? (
               <p className="text-sm leading-relaxed text-[var(--foreground-muted)]">
                 Categories will appear here when their production data sources are ready.
               </p>
             ) : (
               <div role="radiogroup" aria-labelledby="category-selector-heading" className="grid gap-x-8">
-                {categories.map((category) => {
+                {categories.map((category, index) => {
                   const { id, domainId, label, description } = category;
                   return (
                     <CategoryCard
@@ -112,13 +110,14 @@ export default function CategorySelector({
                         playable: category.playable,
                       }}
                       selected={selectedCategoryId === id}
+                      cascadeIndex={index}
                       onClick={() => onSelect(category)}
                     />
                   );
                 })}
               </div>
             )}
-        </motion.div>
+        </div>
       </div>
     </section>
   );

@@ -21,6 +21,8 @@ import {
   migrateLegacyHighScores,
   subscribeHighScores,
 } from "@/lib/highScores/storage";
+import { emitAtmosphere } from "@/lib/atmosphere/eventBus";
+import { rectOf } from "@/lib/atmosphere/delegation";
 
 interface HighScoresModalProps {
   open: boolean;
@@ -78,16 +80,28 @@ export default function HighScoresModal({
       closing.current = false;
       setIsClosing(false);
       closeButtonRef.current?.focus();
+      // Approved allowlist expansion: the dialog's own open/close is the only
+      // reliable signal for Escape, `onCancel` and a backdrop close.
+      emitAtmosphere({
+        type: "modal",
+        state: "open",
+        opener: rectOf(openerRef.current),
+      });
     } else if (!open && dialog.open && !closing.current) {
       closing.current = true;
       setIsClosing(true);
+      emitAtmosphere({
+        type: "modal",
+        state: "closed",
+        opener: rectOf(openerRef.current),
+      });
       if (prefersReducedMotion) dialog.close();
       else closeTimer.current = window.setTimeout(() => {
         closeTimer.current = null;
         dialog.close();
       }, 200);
     }
-  }, [open, prefersReducedMotion]);
+  }, [open, prefersReducedMotion, openerRef]);
 
   useEffect(() => {
     if (!open) return;
@@ -133,6 +147,12 @@ export default function HighScoresModal({
     if (dialogRef.current?.open && !closing.current) {
       closing.current = true;
       setIsClosing(true);
+      // The single funnel for X, Escape (`onCancel`) and a backdrop click.
+      emitAtmosphere({
+        type: "modal",
+        state: "closed",
+        opener: rectOf(openerRef.current),
+      });
       if (prefersReducedMotion) dialogRef.current.close();
       else closeTimer.current = window.setTimeout(() => {
         closeTimer.current = null;
@@ -174,7 +194,7 @@ export default function HighScoresModal({
         if (event.target === dialogRef.current) handleClose();
       }}
       data-closing={isClosing || undefined}
-      className={`high-scores-dialog m-auto max-h-[min(90dvh,52rem)] w-[min(94vw,48rem)] overflow-y-auto border-2 border-white bg-[var(--surface-background)] p-0 text-[var(--foreground-primary)] shadow-[10px_10px_0_var(--accent-classic)] ${prefersReducedMotion ? "motion-reduce" : ""}`}
+      className="high-scores-dialog m-auto max-h-[min(90dvh,52rem)] w-[min(94vw,48rem)] overflow-y-auto border-2 border-white bg-[var(--surface-background)] p-0 text-[var(--foreground-primary)] shadow-[10px_10px_0_var(--accent-classic)]"
     >
       <div className="p-5 sm:p-8">
         <header className="flex items-start justify-between gap-4">
@@ -258,7 +278,7 @@ export default function HighScoresModal({
               tabIndex={mode === option.id ? 0 : -1}
               aria-controls="high-scores-panel"
               onClick={() => setMode(option.id)}
-              className={`min-h-12 cursor-pointer border-x-2 border-t-2 border-white px-3 py-2 text-xs font-bold uppercase tracking-[0.12em] transition-colors sm:text-sm ${mode === option.id ? "bg-[var(--accent-classic)] text-white" : "text-[var(--foreground-muted)] hover:bg-white/10 hover:text-white"}`}
+              className={`min-h-12 cursor-pointer border-x-2 border-t-2 border-white px-3 py-2 text-xs font-bold uppercase tracking-[0.12em] transition-colors sm:text-sm ${mode === option.id ? "bg-[var(--accent-classic)]/22 text-white" : "text-[var(--foreground-muted)] hover:bg-white/10 hover:text-white"}`}
             >
               {option.label}
             </button>
@@ -302,7 +322,8 @@ export default function HighScoresModal({
               {scores.map((record, index) => (
                 <li
                   key={`${record.mode}:${record.categoryId}`}
-                  className="grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 py-3 sm:px-4"
+                  className="row-cascade grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 py-3 sm:px-4"
+                  style={{ animationDelay: `${Math.min(index, 5) * 32}ms` }}
                 >
                   <span className="grid size-7 place-items-center border border-white/50 text-xs font-bold text-[var(--accent-highlight)]">
                     {index + 1}

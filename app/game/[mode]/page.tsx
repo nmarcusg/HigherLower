@@ -1,3 +1,4 @@
+import { ViewTransition } from "react";
 import { notFound, redirect } from "next/navigation";
 import { authorizeGameRoute } from "@/lib/catalog/routeAuthorization";
 import { fetchGameItems } from "@/lib/api";
@@ -45,19 +46,31 @@ export default async function GameModePage(props: PageProps<"/game/[mode]">) {
   const { mode: playableMode, category } = authorization;
   if (playableMode === "classic") {
     return (
-      <ClassicGame
-        initialPool={items}
-        categoryId={category.id}
-        categoryLabel={category.label}
-      />
+      <ViewTransition
+        enter={{ "nav-forward": "nav-forward", default: "none" }}
+        exit={{ "nav-forward": "nav-forward", default: "none" }}
+        default="none"
+      >
+        <ClassicGame
+          initialPool={items}
+          categoryId={category.id}
+          categoryLabel={category.label}
+        />
+      </ViewTransition>
     );
   }
 
   return (
-    <TimeAttackGame
-      initialPool={items}
-      categoryId={category.id}
-      categoryLabel={category.label}
-    />
+    <ViewTransition
+      enter={{ "nav-forward": "nav-forward", default: "none" }}
+      exit={{ "nav-forward": "nav-forward", default: "none" }}
+      default="none"
+    >
+      <TimeAttackGame
+        initialPool={items}
+        categoryId={category.id}
+        categoryLabel={category.label}
+      />
+    </ViewTransition>
   );
 }
