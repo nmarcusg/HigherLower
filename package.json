@@ -9,7 +9,9 @@
     "lint": "eslint",
     "snapshot:album-release-date": "node scripts/generate-album-release-date-snapshot.mjs",
     "snapshot:artist-album-counts": "node scripts/generate-artist-album-counts-snapshot.mjs",
-    "catalog:youtube-channels": "node scripts/generate-youtube-channel-catalog.mjs"
+    "catalog:youtube-channels": "node scripts/generate-youtube-channel-catalog.mjs",
+    "snapshot:monthly-listeners": "node --env-file=.env.local scripts/generate-monthly-listeners-snapshot.mjs",
+    "snapshot:twitch-followers": "node --env-file=.env.local scripts/reread-twitch-metrika.mjs"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",

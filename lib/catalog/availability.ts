@@ -195,10 +195,10 @@ export const CATEGORY_AVAILABILITY: Record<
     ),
   },
   "monthly-listeners": {
-    status: "blocked",
+    status: "released",
     productionPlayable: true,
     rationale:
-      "Owner-approved production release using Metrika Spotify artist views as monthly listeners and a validated local 236-item snapshot; gameplay reads only the local snapshot. Twitch remains independently hidden.",
+      "Owner-approved production release using Metrika Spotify artist views as monthly listeners and a validated local 236-item snapshot; gameplay reads only the local snapshot. Twitch follower data is governed by its own independent availability record.",
     gates: {
       "stable-semantic-identity": {
         satisfied: true,
@@ -214,7 +214,7 @@ export const CATEGORY_AVAILABILITY: Record<
       },
       "runtime-provider-evidence": {
         satisfied: true,
-        evidence: "Stored snapshot has 236 items joined to 236 approved Spotify identities by exact MBID, with unique identities, integer metrics, images and 2026-11-02 collection timestamp; source image-license evidence records no unknown licenses and no required-but-missing credits. Validation is local; no live provider call was made.",
+        evidence: "Stored snapshot has 236 items joined to 236 approved Spotify identities by exact MBID, with unique identities, integer metrics, and images; source image-license evidence records no unknown licenses and no required-but-missing credits; the reader enforces a 7-day warning and a 14-day hard-stale limit on both generatedAt and collectedAt. Validation is local; no live provider call was made.",
       },
       "server-route-authorization": {
         satisfied: true,

@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { beginTwitchMetrikaRun, persistTwitchMetrikaResult } from "./twitch-metrika-persistence.mjs";
+import { beginTwitchMetrikaRun, finalizeTwitchMetrikaRun, persistTwitchMetrikaResult } from "./twitch-metrika-persistence.mjs";
 
 const INPUT = "lib/api/data/twitch-stream-candidates.json";
 const BATCH_SIZE = 10;
@@ -87,6 +87,7 @@ if (!TOKEN) {
         counts[result.status] += 1;
       }
     }
+    await finalizeTwitchMetrikaRun();
     console.log(JSON.stringify({ requests: requestCount, submitted: shortlist.length, returned: Object.values(counts).reduce((a, b) => a + b, 0), statusCounts: counts, startedAt: verifiedAt, completed: true }));
   } catch (error) {
     fail(error instanceof Error ? error.message : "Metrika Twitch account run failed safely.");
