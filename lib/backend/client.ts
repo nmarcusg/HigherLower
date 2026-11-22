@@ -147,7 +147,7 @@ export function createRoom(input: CreateRoomRequest): Promise<RoomCredentialResp
   if (!input.playsetId.trim()) throw new BackendApiError("Choose a valid playset.", null);
 
   return request(
-    "/rooms",
+    typeof window === "undefined" ? "/rooms" : "/api/backend/rooms",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -165,7 +165,7 @@ export function joinRoom(input: JoinRoomRequest): Promise<RoomCredentialResponse
   }
 
   return request(
-    "/rooms/join",
+    typeof window === "undefined" ? "/rooms/join" : "/api/backend/rooms/join",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
