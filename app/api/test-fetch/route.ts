@@ -11,6 +11,8 @@
  *   GET /api/test-fetch?category=album-release-dates
  *   GET /api/test-fetch?category=youtube-subscribers
  *   GET /api/test-fetch?category=game-release-dates
+ *   GET /api/test-fetch?category=monthly-listeners
+ *   GET /api/test-fetch?category=twitch-followers
  *
  * Returns the first 5 normalised GameItem objects and a count summary.
  *
@@ -55,6 +57,8 @@ export async function GET(req: NextRequest) {
           "album-release-dates",
           "youtube-subscribers",
           "game-release-dates",
+          "monthly-listeners",
+          "twitch-followers",
         ],
       },
       { status: 400 },

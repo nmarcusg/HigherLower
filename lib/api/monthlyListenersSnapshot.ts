@@ -6,7 +6,6 @@ import { ApiFetchError, GameItem } from "@/types/api";
 
 const PATH = "lib/api/data/monthly-listeners.snapshot.json";
 export const MONTHLY_LISTENERS_WARNING_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-export const MONTHLY_LISTENERS_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 const SNAPSHOT_VERSION = 1;
 
 export interface MonthlyListenersSnapshot {
@@ -37,18 +36,14 @@ export function parseMonthlyListenersSnapshot(
   }
   const generatedAt = Date.parse(value.generatedAt);
   const collectedAt = Date.parse(value.collectedAt);
-  const generatedAge = now - generatedAt;
-  const collectionAge = now - collectedAt;
   if (
     !Number.isFinite(generatedAt) ||
     generatedAt > now ||
     !Number.isFinite(collectedAt) ||
     collectedAt > now ||
-    collectedAt > generatedAt ||
-    generatedAge > MONTHLY_LISTENERS_MAX_AGE_MS ||
-    collectionAge > MONTHLY_LISTENERS_MAX_AGE_MS
+    collectedAt > generatedAt
   ) {
-    return fail("Snapshot is beyond its 14-day hard-stale limit.");
+    return fail("Snapshot timestamps are invalid, future-dated, or out of order.");
   }
   const ids = new Set<string>();
   const items: GameItem[] = [];
