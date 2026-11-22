@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, Trophy } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion, useReducedMotion } from "motion/react";
 import type {
@@ -285,6 +286,13 @@ export default function HomeSetup({ catalog }: HomeSetupProps) {
     >
       <header className="absolute right-[var(--space-page)] top-5 z-10 flex items-center gap-2">
         <AudioSurface variant="home" />
+        <Link
+          href="/multiplayer"
+          className="inline-flex min-h-11 items-center gap-2 border border-transparent px-3 text-xs text-[var(--foreground-muted)] transition-colors hover:bg-white/10 hover:text-white focus-visible:border-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring)]"
+        >
+          <span className="size-1.5 rounded-full bg-[var(--accent-highlight)]" aria-hidden="true" />
+          <span>Multiplayer</span>
+        </Link>
         <button
           ref={openerRef}
           type="button"
