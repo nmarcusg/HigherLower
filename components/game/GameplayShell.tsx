@@ -42,10 +42,10 @@ export default function GameplayShell({
   return (
     <div
       data-gameplay-mode={mode}
-      className="relative isolate flex min-h-dvh min-w-0 w-full flex-col overflow-x-hidden bg-grid bg-[var(--surface-background)]"
+      className="relative isolate flex min-h-dvh min-w-0 w-full flex-col overflow-x-hidden bg-grid gameplay-surface"
       style={{ "--gameplay-accent": MODE_ACCENTS[mode] } as React.CSSProperties}
     >
-      <header className="relative z-20 flex flex-col border-b-2 border-[var(--border-mid)] bg-[var(--surface-background)]/95 backdrop-blur">
+      <header className="relative z-20 flex flex-col border-b-2 border-[var(--border-mid)] bg-[var(--surface-background)]">
         <div className="grid min-h-[5.5rem] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-4 py-3 sm:gap-4 sm:px-6">
           {/* Back control — dark circular face + mode-accent lower-right offset,
               matching the OR badge language. The offset is a box-shadow so it
@@ -63,12 +63,14 @@ export default function GameplayShell({
             <h1 className="truncate text-sm font-bold uppercase tracking-[0.12em] text-[var(--foreground-primary)] sm:text-base">
               {title}
             </h1>
-            <p className="mt-1 text-[0.6rem] uppercase tracking-[0.18em] text-[var(--foreground-muted)] sm:text-xs">
+            <p className="mt-1 truncate text-[0.6rem] uppercase tracking-[0.18em] text-[var(--foreground-muted)] sm:text-xs">
               {subtitle}
             </p>
           </div>
 
-          {/* Score / status region — kept inside the header boundary. */}
+          {/* Score / status region — kept inside the header boundary. Audio is
+              owned by the headless layout mount, so gameplay carries no audio
+              chrome; the score block stays right-anchored here. */}
           <div className="col-start-3 row-start-1 flex min-w-0 max-w-full items-center justify-end gap-2 overflow-hidden sm:gap-4">
             {status}
           </div>

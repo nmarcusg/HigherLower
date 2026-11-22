@@ -4,6 +4,12 @@ interface ComparisonBoardProps {
   current: ReactNode;
   next: ReactNode;
   className?: string;
+  /**
+   * Reveal phase. Drives the decorative OR badge's focus-mode fade so the
+   * decisive beat belongs to the two cards, while every interactive control
+   * keeps full contrast.
+   */
+  phase?: "playing" | "revealing" | "game-over";
 }
 
 /**
@@ -18,6 +24,7 @@ export default function ComparisonBoard({
   current,
   next,
   className = "",
+  phase = "playing",
 }: ComparisonBoardProps) {
   return (
     <section
@@ -33,7 +40,9 @@ export default function ComparisonBoard({
 
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute left-1/2 top-1/2 z-20 hidden h-[5.5rem] w-[5.5rem] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-4 border-white bg-[var(--surface-background)] text-xl font-bold text-white shadow-[5px_5px_0_var(--gameplay-accent)] md:flex"
+        className={`pointer-events-none absolute left-1/2 top-1/2 z-20 hidden h-[5.5rem] w-[5.5rem] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-4 border-white bg-[var(--surface-background)] text-xl font-bold text-white shadow-[5px_5px_0_var(--gameplay-accent)] transition-opacity duration-[140ms] ease-[cubic-bezier(0.23,1,0.32,1)] md:flex ${
+          phase === "revealing" ? "opacity-50" : "opacity-100"
+        }`}
       >
         OR
       </div>

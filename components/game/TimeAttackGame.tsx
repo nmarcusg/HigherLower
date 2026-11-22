@@ -35,14 +35,19 @@ import GameplayShell from "@/components/game/GameplayShell";
 import ComparisonBoard from "@/components/game/ComparisonBoard";
 import GameplayDivider from "@/components/game/GameplayDivider";
 import DecisionControls from "@/components/game/DecisionControls";
-import GameplayStatus from "@/components/game/GameplayStatus";
+import GameplayStatus, {
+  type IntensityTier,
+} from "@/components/game/GameplayStatus";
 import DerivedGameState from "@/components/game/DerivedGameState";
+import { GameplayEntranceStatus } from "@/components/game/GameplayEntrance";
 import {
   readHighScore,
   subscribeHighScores,
   writeHighScore,
 } from "@/lib/highScores/storage";
 import { buildDeck, shuffleDeck } from "@/lib/game/deck";
+import { emitAtmosphere } from "@/lib/atmosphere/eventBus";
+import { gameplayStatusOrigin, originFor } from "@/lib/atmosphere/delegation";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -56,6 +61,19 @@ const REVEAL_MS_WRONG = 400;
 
 type GamePhase = "playing" | "revealing" | "game-over";
 type ResultTint = "correct" | "incorrect" | null;
+
+/**
+ * Display-only reward ladder, identical thresholds to Classic but read from the
+ * cumulative correct count. Deliberately NOT a consecutive-correct combo: that
+ * would be new display state, which is out of scope for this pass.
+ */
+function resolveTier(score: number, isNewBest: boolean): IntensityTier {
+  if (score >= 5 || (isNewBest && score >= 3)) return 4;
+  if (score >= 3) return 3;
+  if (score === 2) return 2;
+  if (score === 1) return 1;
+  return 0;
+}
 
 interface TimeAttackGameProps {
   initialPool: GameItem[];
@@ -108,6 +126,10 @@ export default function TimeAttackGame({
   const gameOverOriginRef = useRef<HTMLElement | null>(null);
   const previousPhaseRef = useRef<GamePhase>(phase);
 
+  // Handoff gate (see ClassicGame): captured once in state, never on first paint.
+  const [openingItemId] = useState(() => currentItem?.id);
+  const enterHandoff = currentItem?.id !== openingItemId;
+
   // ── Timer (ref = source of truth; state = display) ─────────────────────────
   const timerRef = useRef(INITIAL_TIME);
   const [displayTime, setDisplayTime] = useState(INITIAL_TIME);
@@ -123,6 +145,9 @@ export default function TimeAttackGame({
   const deltaKeyRef = useRef(0);
 
   const guessLocked = useRef(false);
+  // Set only around a keyboard-initiated guess, so the emitted `source` is
+  // exact. Informational only: no gameplay state changes.
+  const guessSourceRef = useRef<"pointer" | "keyboard" | null>(null);
 
   // Guards the one-time high-score write for a completed run. The write is a
   // side effect and must not run during render (see the game-over effect).
@@ -138,6 +163,20 @@ export default function TimeAttackGame({
     () => 0,
   );
 
+  // The tally is a reveal beat (design §4.3 t1), matching Classic. `score` is
+  // still written only by the untouched 800 ms advance, so a correct reveal
+  // reads the prospective count for display. Display-only: no timer or handler
+  // change.
+  const isRevealCorrect = phase === "revealing" && tint === "correct";
+  const displayScore = isRevealCorrect ? score + 1 : score;
+
+  // Display-only ladder position, read from the cumulative correct count. A new
+  // best only counts when a best already exists to beat.
+  const tier = resolveTier(
+    displayScore,
+    highScore > 0 && displayScore > highScore,
+  );
+
   // ── Timer logic ────────────────────────────────────────────────────────────
   function startTimer() {
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -145,6 +184,14 @@ export default function TimeAttackGame({
       if (phaseRef.current === "game-over") return;
       timerRef.current = Math.max(0, timerRef.current - 1);
       setDisplayTime(timerRef.current);
+      // Owner brief: urgency (visual and audible) begins at ≤ 10 s; ticks stop
+      // the moment the phase leaves `playing`.
+      emitAtmosphere({
+        type: "timer",
+        secondsLeft: timerRef.current,
+        urgent: timerRef.current <= 10,
+        fromTick: true,
+      });
       if (timerRef.current <= 0) {
         clearInterval(intervalRef.current!);
         intervalRef.current = null;
@@ -152,6 +199,7 @@ export default function TimeAttackGame({
         guessLocked.current = true;
         setPhase("game-over");
         setTint(null);
+        emitAtmosphere({ type: "phase", phase: "game-over" });
       }
     }, 1000);
   }
@@ -161,7 +209,6 @@ export default function TimeAttackGame({
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Sync phaseRef whenever phase changes
@@ -224,8 +271,37 @@ export default function TimeAttackGame({
           ? nextItem.value > currentItem.value
           : nextItem.value < currentItem.value;
 
+      const guessOrigin = originFor(
+        activeElement,
+        direction === "higher" ? '[aria-label="Higher"]' : '[aria-label="Lower"]',
+      );
+      emitAtmosphere({
+        type: "guess",
+        direction,
+        source: guessSourceRef.current === "keyboard" ? "keyboard" : "pointer",
+        x: guessOrigin.x,
+        y: guessOrigin.y,
+        w: guessOrigin.w,
+        h: guessOrigin.h,
+      });
+      const prospectiveScore = score + (isCorrect ? 1 : 0);
+      emitAtmosphere({
+        type: "reveal",
+        correct: isCorrect,
+        tier: resolveTier(
+          prospectiveScore,
+          highScore > 0 && prospectiveScore > highScore,
+        ),
+        origin: gameplayStatusOrigin(),
+      });
+      const deltaOrigin = originFor(
+        document.querySelector('[role="timer"]'),
+        '[role="timer"]',
+      );
+
       setPhase("revealing");
       setTint(isCorrect ? "correct" : "incorrect");
+      emitAtmosphere({ type: "phase", phase: "revealing" });
 
       if (isCorrect) {
         timerRef.current = Math.min(timerRef.current + BONUS_CORRECT, 999);
@@ -236,6 +312,7 @@ export default function TimeAttackGame({
           text: `+${BONUS_CORRECT}s`,
           color: "text-emerald-400",
         });
+        emitAtmosphere({ type: "delta", kind: "gain", origin: deltaOrigin });
       } else {
         timerRef.current = Math.max(0, timerRef.current - PENALTY_WRONG);
         setDisplayTime(timerRef.current);
@@ -245,6 +322,7 @@ export default function TimeAttackGame({
           text: `-${PENALTY_WRONG}s`,
           color: "text-rose-400",
         });
+        emitAtmosphere({ type: "delta", kind: "loss", origin: deltaOrigin });
         setShaking(true);
         setTimeout(() => setShaking(false), 460);
       }
@@ -271,6 +349,7 @@ export default function TimeAttackGame({
           guessLocked.current = true;
           setPhase("game-over");
           setTint(null);
+          emitAtmosphere({ type: "phase", phase: "game-over" });
           return;
         }
 
@@ -280,19 +359,28 @@ export default function TimeAttackGame({
         if (phaseRef.current !== "game-over") {
           phaseRef.current = "playing";
           setPhase("playing");
+          emitAtmosphere({ type: "phase", phase: "playing" });
         }
         guessLocked.current = false;
       }, delay);
     },
-    [nextItem, currentItem],
+    [nextItem, currentItem, score, highScore],
   );
 
   // ── Keyboard ───────────────────────────────────────────────────────────────
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (shouldIgnoreShortcut(e)) return;
-      if (e.key === "ArrowUp" || e.key === "h") handleGuess("higher");
-      if (e.key === "ArrowDown" || e.key === "l") handleGuess("lower");
+      if (e.key === "ArrowUp" || e.key === "h") {
+        guessSourceRef.current = "keyboard";
+        handleGuess("higher");
+        guessSourceRef.current = null;
+      }
+      if (e.key === "ArrowDown" || e.key === "l") {
+        guessSourceRef.current = "keyboard";
+        handleGuess("lower");
+        guessSourceRef.current = null;
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -313,6 +401,7 @@ export default function TimeAttackGame({
     setDeltaLabel(null);
     phaseRef.current = "playing";
     setPhase("playing");
+    emitAtmosphere({ type: "phase", phase: "playing" });
     startTimer();
   }
 
@@ -338,10 +427,17 @@ export default function TimeAttackGame({
       title={`${categoryLabel} · Time Attack`}
       subtitle="Race the clock"
       status={
-        <div className="flex items-center gap-11">
-          <GameplayStatus value={score} label="Score" />
-          {highScore > 0 && <GameplayStatus value={highScore} label="Best" />}
-        </div>
+        <GameplayEntranceStatus>
+          <div className="flex items-center gap-11">
+            <GameplayStatus
+              value={displayScore}
+              label="Score"
+              bump={displayScore > 0}
+              tier={tier}
+            />
+            {highScore > 0 && <GameplayStatus value={highScore} label="Best" />}
+          </div>
+        </GameplayEntranceStatus>
       }
       headerFooter={
         <div className="flex items-center gap-4">
@@ -352,7 +448,7 @@ export default function TimeAttackGame({
               role="timer"
               aria-label={`${displayTime} seconds remaining`}
               aria-live={isUrgent ? "assertive" : "off"}
-              className={`text-3xl font-bold tabular-nums ${isUrgent ? "text-[var(--status-error)]" : "text-[var(--foreground-primary)]"}`}
+              className={`text-3xl font-bold tabular-nums ${isUrgent ? "timer-urgent text-[var(--status-error)]" : "text-[var(--foreground-primary)]"}`}
             >
               {pad2(displayTime)}
             </div>
@@ -360,7 +456,11 @@ export default function TimeAttackGame({
               <span
                 key={deltaLabel.key}
                 aria-hidden="true"
-                className={`float-up absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs font-bold ${deltaLabel.color}`}
+                className={`${
+                  deltaLabel.text.startsWith("-")
+                    ? "float-up-brief"
+                    : "float-up-reveal"
+                } absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs font-bold ${deltaLabel.color}`}
               >
                 {deltaLabel.text}
               </span>
@@ -383,7 +483,7 @@ export default function TimeAttackGame({
       }
     >
       <div
-        className={`relative flex min-h-0 flex-1 flex-col ${shaking ? "shake" : ""}`}
+        className={`relative flex min-h-0 flex-1 flex-col gameplay-entrance ${shaking ? "shake" : ""}`}
       >
         <GameplayDivider />
 
@@ -398,6 +498,7 @@ export default function TimeAttackGame({
         </div>
 
         <ComparisonBoard
+          phase={phase}
           current={
             <GameCard
               key={currentItem.id}
@@ -406,6 +507,7 @@ export default function TimeAttackGame({
               side="current"
               resultTint={phase === "revealing" ? tint : null}
               mode="time-attack"
+              enterHandoff={enterHandoff}
             />
           }
           next={
@@ -416,6 +518,8 @@ export default function TimeAttackGame({
               side="next"
               resultTint={phase === "revealing" ? tint : null}
               mode="time-attack"
+              enterHandoff={enterHandoff}
+              enterDelay={0.04}
             />
           }
         />
@@ -425,7 +529,7 @@ export default function TimeAttackGame({
             onHigher={() => handleGuess("higher")}
             onLower={() => handleGuess("lower")}
             disabled={phase !== "playing"}
-            className="relative z-30 px-4 pb-8 md:ml-auto md:mr-0 md:w-1/2 md:px-0 md:pr-6 lg:pr-10"
+            className="gameplay-entrance-controls relative z-30 px-4 pb-8 md:ml-auto md:mr-0 md:w-1/2 md:px-0 md:pr-6 lg:pr-10"
           />
         )}
       </div>
