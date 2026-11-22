@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Space_Mono } from "next/font/google";
 import "./globals.css";
+import AtmosphereBackdrop from "@/components/atmosphere/AtmosphereBackdrop";
+import AudioSurface from "@/components/audio/AudioSurface";
 
 const spaceMono = Space_Mono({
   subsets: ["latin"],
@@ -35,7 +37,9 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${spaceMono.variable} h-full dark`}>
       <body className="min-h-full flex flex-col bg-grid bg-noise antialiased">
+        <AtmosphereBackdrop />
         {children}
+        <AudioSurface />
       </body>
     </html>
   );
