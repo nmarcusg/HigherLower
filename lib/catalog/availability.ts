@@ -214,7 +214,7 @@ export const CATEGORY_AVAILABILITY: Record<
       },
       "runtime-provider-evidence": {
         satisfied: true,
-        evidence: "Stored snapshot has 236 items joined to 236 approved Spotify identities by exact MBID, with unique identities, integer metrics, and images; source image-license evidence records no unknown licenses and no required-but-missing credits; the reader enforces a 7-day warning and a 14-day hard-stale limit on both generatedAt and collectedAt. Validation is local; no live provider call was made.",
+        evidence: "Stored snapshot has 236 items joined to 236 approved Spotify identities by exact MBID, with unique identities, integer metrics, and images; source image-license evidence records no unknown licenses and no required-but-missing credits; the reader surfaces a 7-day freshness warning on both generatedAt and collectedAt, and staleness beyond that is advisory only (the hard-stale cutoff is no longer enforced), so the snapshot date may lag provider data. Validation is local; no live provider call was made.",
       },
       "server-route-authorization": {
         satisfied: true,
@@ -222,7 +222,7 @@ export const CATEGORY_AVAILABILITY: Record<
       },
       "public-catalog-eligibility": {
         satisfied: true,
-        evidence: "Owner-approved activation; 236-item qualified snapshot exceeds the existing production pool floor, attribution is preserved for required-credit Commons images, and 7-day warning/14-day hard-stale checks are enforced.",
+        evidence: "Owner-approved activation; 236-item qualified snapshot exceeds the existing production pool floor, attribution is preserved for required-credit Commons images, and the 7-day freshness warning is advisory only — no hard-stale cutoff blocks dispatch.",
       },
       "reversible-visibility": {
         satisfied: true,
@@ -259,7 +259,7 @@ export const CATEGORY_AVAILABILITY: Record<
       },
       "runtime-provider-evidence": {
         satisfied: true,
-        evidence: "Local validation confirms 196 unique approved runtime identities, one finite valid metric per identity, four rejected identities absent, and runtime images limited to verified Twitch profile-image URLs from the local avatar artifact or the deterministic identicon fallback. No provider request occurs at gameplay time; avatar enrichment is an offline developer-run step.",
+        evidence: "Local validation confirms 196 unique approved runtime identities, one finite valid metric per identity, four rejected identities absent, and runtime images limited to verified Twitch profile-image URLs from the local avatar artifact or the deterministic identicon fallback. Metrika snapshot age is advisory only: staleness emits a warning and the hard-stale cutoff is no longer enforced, so the snapshot date may lag provider data. No provider request occurs at gameplay time; avatar enrichment is an offline developer-run step.",
       },
       "server-route-authorization": {
         satisfied: true,
