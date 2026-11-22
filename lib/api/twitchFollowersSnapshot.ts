@@ -109,8 +109,13 @@ function parseMetrics(raw: unknown, now: number): { source: string; generatedAt:
     return fail("Metrika snapshot schema is invalid.");
   }
   const generatedAt = Date.parse(raw.generatedAt);
-  if (!Number.isFinite(generatedAt) || generatedAt > now || now - generatedAt > MAX_AGE_MS) {
-    return fail("Metrika snapshot is beyond its 14-day hard-stale limit.");
+  if (!Number.isFinite(generatedAt) || generatedAt > now) {
+    return fail("Metrika snapshot timestamp is invalid or future-dated.");
+  }
+  if (now - generatedAt > MAX_AGE_MS) {
+    console.warn(
+      `[TwitchFollowersSnapshot] Metrika snapshot freshness warning: generation age ${Math.floor((now - generatedAt) / 86_400_000)} days.`,
+    );
   }
   const logins = new Set<string>();
   const ids = new Set<string>();
