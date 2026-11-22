@@ -4,6 +4,16 @@ import {
   type CategorySummary,
   type CreateRoomRequest,
   type JoinRoomRequest,
+  type PublicPlaysetDetail,
+  type PublicPlaysetPage,
+  type PublicPlaysetSummary,
+  type PublicPlaysetItem,
+  type CreateSoloSessionResponse,
+  type SoloAnswerReceipt,
+  type SoloChoice,
+  type SoloMode,
+  type SoloResults,
+  type SoloSessionState,
   type RoomCredentialResponse,
 } from "./types";
 
@@ -88,6 +98,109 @@ function parseRoomCredential(value: unknown): RoomCredentialResponse {
   };
 }
 
+function isSoloPublicItem(value: unknown): boolean {
+  return isRecord(value) && isString(value.id) && isString(value.name) &&
+    isNullableString(value.imageUrl) &&
+    (value.displayValue === undefined || isString(value.displayValue));
+}
+
+function isSoloSessionState(value: unknown): value is SoloSessionState {
+  return isRecord(value) && isString(value.sessionId) &&
+    (value.questionId === null || isString(value.questionId)) &&
+    Number.isInteger(value.stateVersion) && Number.isInteger(value.serverNow) &&
+    ["AWAITING_ANSWER", "REVEAL", "FINISHED", "CANCELLED"].includes(String(value.phase)) &&
+    ["RUNNING", "FINALIZING", "FINISHED", "CANCELLED"].includes(String(value.status)) &&
+    ["CLASSIC", "TIME_ATTACK"].includes(String(value.mode)) && Number.isInteger(value.score) &&
+    (value.expiresAt === null || Number.isInteger(value.expiresAt)) &&
+    (value.revealEndsAt === null || Number.isInteger(value.revealEndsAt)) &&
+    typeof value.revealed === "boolean" &&
+    (value.left === null || isSoloPublicItem(value.left)) &&
+    (value.right === null || isSoloPublicItem(value.right)) &&
+    (value.runtimeStatus === undefined || ["RUNNING", "FINALIZING", "FINISHED", "CANCELLED"].includes(String(value.runtimeStatus)));
+}
+
+function parseSoloState(value: unknown): SoloSessionState {
+  if (!isSoloSessionState(value)) {
+    throw new BackendApiError("The API returned an invalid game state.", null);
+  }
+  return {
+    ...value,
+    // Create-session emits the initial public state before it has a separate
+    // runtime status field. Later reads include it. In both cases `status` is
+    // the authoritative equivalent for the UI.
+    runtimeStatus: (value.runtimeStatus ?? value.status) as SoloSessionState["runtimeStatus"],
+  } as SoloSessionState;
+}
+
+function parseCreateSoloSession(value: unknown): CreateSoloSessionResponse {
+  if (!isRecord(value) || !isString(value.sessionId) || !isString(value.gameToken) ||
+    !parseSoloState(value.state)) {
+    throw new BackendApiError("The API returned an invalid new game response.", null);
+  }
+  return { sessionId: value.sessionId, gameToken: value.gameToken, state: value.state as SoloSessionState };
+}
+
+function parseSoloAnswer(value: unknown): SoloAnswerReceipt {
+  if (!isRecord(value) || !isString(value.questionId) || !isString(value.requestId) ||
+    !["HIGHER", "LOWER"].includes(String(value.choice)) || typeof value.correct !== "boolean" ||
+    !["HIGHER", "LOWER"].includes(String(value.correctChoice)) || !Number.isInteger(value.score) ||
+    !["AWAITING_ANSWER", "REVEAL", "FINISHED", "CANCELLED"].includes(String(value.phase)) ||
+    !["RUNNING", "FINALIZING", "FINISHED", "CANCELLED"].includes(String(value.status)) ||
+    typeof value.eliminated !== "boolean" || !Number.isInteger(value.stateVersion) ||
+    !Number.isInteger(value.serverNow) || (value.expiresAt !== null && !Number.isInteger(value.expiresAt)) ||
+    (value.revealEndsAt !== null && !Number.isInteger(value.revealEndsAt)) ||
+    !isSoloPublicItem(value.left) || !isSoloPublicItem(value.right) ||
+    !["RUNNING", "FINALIZING", "FINISHED", "CANCELLED"].includes(String(value.runtimeStatus))) {
+    throw new BackendApiError("The API returned an invalid answer receipt.", null);
+  }
+  return value as unknown as SoloAnswerReceipt;
+}
+
+function parseSoloResults(value: unknown): SoloResults {
+  if (!isRecord(value) || !isString(value.sessionId) ||
+    !["RUNNING", "FINALIZING", "FINISHED", "CANCELLED"].includes(String(value.status)) ||
+    !Number.isInteger(value.score) || typeof value.eliminated !== "boolean" ||
+    !isNullableString(value.finishedAt) || !["CLASSIC", "TIME_ATTACK"].includes(String(value.mode))) {
+    throw new BackendApiError("The API returned invalid game results.", null);
+  }
+  return value as unknown as SoloResults;
+}
+
+function isPublicPlaysetSummary(value: unknown): value is PublicPlaysetSummary {
+  return isRecord(value) && isString(value.id) && isString(value.title) &&
+    isString(value.description) && isString(value.metricName) &&
+    isString(value.metricUnit) && Number.isInteger(value.itemCount) &&
+    Number.isInteger(value.revision);
+}
+
+function isPublicPlaysetItem(value: unknown): value is PublicPlaysetItem {
+  return isRecord(value) && isString(value.id) && isString(value.name) &&
+    isNullableString(value.imageUrl) && isString(value.sourceLabel) &&
+    (value.sourceYear === null || Number.isInteger(value.sourceYear));
+}
+
+function parsePublicPlaysetPage(value: unknown): PublicPlaysetPage {
+  if (!isRecord(value) || !Number.isInteger(value.total) || !Number.isInteger(value.limit) ||
+    !Number.isInteger(value.offset) || !Array.isArray(value.playsets) ||
+    !value.playsets.every(isPublicPlaysetSummary)) {
+    throw new BackendApiError("The API returned an invalid playsets response.", null);
+  }
+  return {
+    total: value.total as number,
+    limit: value.limit as number,
+    offset: value.offset as number,
+    playsets: value.playsets,
+  };
+}
+
+function parsePublicPlaysetDetail(value: unknown): PublicPlaysetDetail {
+  if (!isPublicPlaysetSummary(value) || !isRecord(value) || !Array.isArray(value.items) ||
+    !value.items.every(isPublicPlaysetItem)) {
+    throw new BackendApiError("The API returned an invalid playset response.", null);
+  }
+  return { ...value, items: value.items };
+}
+
 async function request<T>(path: string, init: RequestInit, parse: (body: unknown) => T): Promise<T> {
   let response: Response;
   try {
@@ -132,6 +245,87 @@ export function fetchCategories(options?: { signal?: AbortSignal }): Promise<Cat
   // Server-rendered pages call the API directly and retain their local fallback.
   const path = typeof window === "undefined" ? "/categories" : "/api/backend/categories";
   return request(path, { method: "GET", cache: "no-store", signal }, parseCategoryPage);
+}
+
+function soloPath(sessionId?: string, suffix = ""): string {
+  const base = typeof window === "undefined" ? "/sessions" : "/api/backend/sessions";
+  if (!sessionId) return base;
+  return `${base}/${encodeURIComponent(sessionId)}${suffix}`;
+}
+
+function gameTokenHeaders(gameToken: string): HeadersInit {
+  return { Authorization: `Bearer ${gameToken}` };
+}
+
+export function createSoloSession(input: { playsetId: string; mode: SoloMode }): Promise<CreateSoloSessionResponse> {
+  return request(soloPath(), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+    cache: "no-store",
+    signal: AbortSignal.timeout(120_000),
+  }, parseCreateSoloSession);
+}
+
+export function getSoloSession(sessionId: string, gameToken: string): Promise<SoloSessionState> {
+  return request(soloPath(sessionId), {
+    method: "GET",
+    headers: gameTokenHeaders(gameToken),
+    cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
+  }, parseSoloState);
+}
+
+export function answerSoloQuestion(input: {
+  sessionId: string;
+  gameToken: string;
+  questionId: string;
+  choice: SoloChoice;
+  requestId: string;
+}): Promise<SoloAnswerReceipt> {
+  return request(soloPath(input.sessionId, "/answers"), {
+    method: "POST",
+    headers: { ...gameTokenHeaders(input.gameToken), "Content-Type": "application/json" },
+    body: JSON.stringify({ questionId: input.questionId, choice: input.choice, requestId: input.requestId }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
+  }, parseSoloAnswer);
+}
+
+export function endSoloSession(sessionId: string, gameToken: string): Promise<SoloSessionState> {
+  return request(soloPath(sessionId, "/end"), {
+    method: "POST",
+    headers: gameTokenHeaders(gameToken),
+    cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
+  }, parseSoloState);
+}
+
+export function getSoloResults(sessionId: string, gameToken: string): Promise<SoloResults> {
+  return request(soloPath(sessionId, "/results"), {
+    method: "GET",
+    headers: gameTokenHeaders(gameToken),
+    cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
+  }, parseSoloResults);
+}
+
+export function fetchPublicPlaysets(options: { limit?: number; offset?: number; signal?: AbortSignal } = {}): Promise<PublicPlaysetPage> {
+  const params = new URLSearchParams();
+  if (options.limit !== undefined) params.set("limit", String(options.limit));
+  if (options.offset !== undefined) params.set("offset", String(options.offset));
+  const query = params.size ? `?${params.toString()}` : "";
+  const base = typeof window === "undefined" ? "/playsets" : "/api/backend/playsets";
+  return request(`${base}${query}`, { method: "GET", cache: "no-store", signal: options.signal }, parsePublicPlaysetPage);
+}
+
+export function fetchPublicPlayset(id: string, options: { signal?: AbortSignal } = {}): Promise<PublicPlaysetDetail> {
+  const normalizedId = id.trim();
+  if (!normalizedId || normalizedId.length > 100) {
+    throw new BackendApiError("Enter a valid playset ID.", null);
+  }
+  const base = typeof window === "undefined" ? "/playsets" : "/api/backend/playsets";
+  return request(`${base}/${encodeURIComponent(normalizedId)}`, { method: "GET", cache: "no-store", signal: options.signal }, parsePublicPlaysetDetail);
 }
 
 function validateNickname(nickname: string): string {

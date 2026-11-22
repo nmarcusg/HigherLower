@@ -33,6 +33,98 @@ export interface CategoryPage {
   categories: CategorySummary[];
 }
 
+export type SoloMode = "CLASSIC" | "TIME_ATTACK";
+export type SoloChoice = "HIGHER" | "LOWER";
+export type SoloPhase = "AWAITING_ANSWER" | "REVEAL" | "FINISHED" | "CANCELLED";
+export type SoloStatus = "RUNNING" | "FINALIZING" | "FINISHED" | "CANCELLED";
+
+export interface SoloPublicItem {
+  id: string;
+  name: string;
+  imageUrl: string | null;
+  displayValue?: string;
+}
+
+export interface SoloSessionState {
+  sessionId: string;
+  questionId: string | null;
+  stateVersion: number;
+  serverNow: number;
+  phase: SoloPhase;
+  status: SoloStatus;
+  mode: SoloMode;
+  score: number;
+  expiresAt: number | null;
+  revealEndsAt: number | null;
+  revealed: boolean;
+  left: SoloPublicItem | null;
+  right: SoloPublicItem | null;
+  runtimeStatus: SoloStatus;
+}
+
+export interface CreateSoloSessionResponse {
+  sessionId: string;
+  gameToken: string;
+  state: SoloSessionState;
+}
+
+export interface SoloAnswerReceipt {
+  questionId: string;
+  requestId: string;
+  choice: SoloChoice;
+  correct: boolean;
+  correctChoice: SoloChoice;
+  score: number;
+  phase: SoloPhase;
+  status: SoloStatus;
+  eliminated: boolean;
+  stateVersion: number;
+  serverNow: number;
+  expiresAt: number | null;
+  revealEndsAt: number | null;
+  left: SoloPublicItem;
+  right: SoloPublicItem;
+  runtimeStatus: SoloStatus;
+}
+
+export interface SoloResults {
+  sessionId: string;
+  status: SoloStatus;
+  score: number;
+  eliminated: boolean;
+  finishedAt: string | null;
+  mode: SoloMode;
+}
+
+export interface PublicPlaysetSummary {
+  id: string;
+  title: string;
+  description: string;
+  metricName: string;
+  metricUnit: string;
+  itemCount: number;
+  revision: number;
+}
+
+export interface PublicPlaysetItem {
+  id: string;
+  name: string;
+  imageUrl: string | null;
+  sourceLabel: string;
+  sourceYear: number | null;
+}
+
+export interface PublicPlaysetDetail extends PublicPlaysetSummary {
+  items: PublicPlaysetItem[];
+}
+
+export interface PublicPlaysetPage {
+  total: number;
+  limit: number;
+  offset: number;
+  playsets: PublicPlaysetSummary[];
+}
+
 export interface RoomCredentialResponse {
   sessionId: string;
   roomCode: string;

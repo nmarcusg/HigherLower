@@ -118,3 +118,35 @@ export function authorizeGameRoute(
     providerCategory,
   };
 }
+
+/**
+ * Route gate for backend owned sessions. The local release checklist used by
+ * the legacy provider game is not authoritative for backend categories; the
+ * live backend catalog decides playability after semantic route validation.
+ */
+export function authorizeBackendGameRoute(
+  modeInput: unknown,
+  categoryInput: unknown,
+): RouteAuthorizationResult {
+  if (typeof modeInput !== "string" || !PLAYABLE_MODES.includes(modeInput as PlayableModeId)) {
+    return { status: "unsupported-mode" };
+  }
+  if (categoryInput === undefined || categoryInput === null || categoryInput === "") {
+    return { status: "missing-category" };
+  }
+  if (typeof categoryInput !== "string" || LEGACY_CATEGORY_IDS.has(categoryInput)) {
+    return { status: "invalid-category" };
+  }
+  const category = SEMANTIC_CATEGORIES.find((candidate) => candidate.id === categoryInput);
+  if (!category) return { status: "invalid-category" };
+  const mode = modeInput as PlayableModeId;
+  if (!category.compatibleModes.includes(mode)) return { status: "incompatible-mode", mode, category };
+  const providerCategory = resolveProviderCategory(category.id);
+  return {
+    status: "authorized",
+    mode,
+    category,
+    categoryId: category.id,
+    providerCategory: providerCategory ?? "",
+  };
+}

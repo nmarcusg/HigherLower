@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowUpRight, Check, Copy, Crown, Users, Wifi } from "lucide-react";
 import {
   BackendApiError,
@@ -12,6 +13,7 @@ import {
   type RoomCredentialResponse,
   type RoomMode,
 } from "@/lib/backend";
+import { createSpectatorCredential, readRoomCredential, storeRoomCredential } from "@/lib/backend/multiplayer";
 
 const ROOM_MODES: ReadonlyArray<{ id: RoomMode; label: string; description: string }> = [
   { id: "PVP_SPEED", label: "Speed", description: "Shared rounds. Fastest correct answer wins." },
@@ -23,6 +25,7 @@ const ROOM_MODES: ReadonlyArray<{ id: RoomMode; label: string; description: stri
 const inputClass = "w-full rounded-sm border border-white/25 bg-[#15122b] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-[var(--focus-ring)] focus:ring-2 focus:ring-[var(--focus-ring)]/30";
 
 export default function MultiplayerLobby() {
+  const router = useRouter();
   const [nickname, setNickname] = useState("");
   const [roomCode, setRoomCode] = useState("");
   const [mode, setMode] = useState<RoomMode>("PVP_SPEED");
@@ -32,6 +35,11 @@ export default function MultiplayerLobby() {
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [room, setRoom] = useState<RoomCredentialResponse | null>(null);
+  const [joinAsSpectator, setJoinAsSpectator] = useState(false);
+  const [roundCount, setRoundCount] = useState(5);
+  const [answerTimeSeconds, setAnswerTimeSeconds] = useState<3 | 5 | 10 | 15>(15);
+  const [matchDurationMinutes, setMatchDurationMinutes] = useState(5);
+  const [recentRoom, setRecentRoom] = useState(false);
 
   const playableCategories = useMemo(
     () => categories.filter((category) => category.playable && category.playsetId),
@@ -39,6 +47,8 @@ export default function MultiplayerLobby() {
   );
 
   useEffect(() => {
+    const saved = readRoomCredential();
+    setRecentRoom(Boolean(saved));
     const controller = new AbortController();
     fetchCategories({ signal: controller.signal })
       .then((page) => {
@@ -51,13 +61,6 @@ export default function MultiplayerLobby() {
       .catch(() => setStatus("The game service is waking up. Try again in a moment."));
     return () => controller.abort();
   }, []);
-
-  function storeRoomCredential(credential: RoomCredentialResponse) {
-    window.localStorage.setItem(
-      "higher-lower:room-credential:v1",
-      JSON.stringify({ sessionId: credential.sessionId, roomCode: credential.roomCode, gameToken: credential.gameToken }),
-    );
-  }
 
   function reportError(error: unknown) {
     setStatus(error instanceof BackendApiError ? error.message : "Something went wrong. Please try again.");
@@ -74,10 +77,19 @@ export default function MultiplayerLobby() {
     }
     setBusy(true);
     try {
-      const credential = await createRoom({ playsetId, nickname, mode });
-      storeRoomCredential(credential);
-      setRoom(credential);
-      setStatus(`Room ${credential.roomCode} is ready. Share the code, then start when your players arrive.`);
+      const credential = await createRoom({
+        playsetId,
+        nickname,
+        mode,
+        ...(mode === "PVP_SCORE_RACE" ? { matchDurationMinutes } : { roundCount, answerTimeSeconds }),
+      });
+      storeRoomCredential({ ...credential, nickname });
+      setRoom({
+        ...credential,
+        state: credential.state as Record<string, unknown>,
+      });
+      setStatus(`Room ${credential.roomCode} is ready. Opening the room…`);
+      router.push(`/multiplayer/room/${encodeURIComponent(credential.sessionId)}`);
     } catch (error) {
       reportError(error);
     } finally {
@@ -92,10 +104,16 @@ export default function MultiplayerLobby() {
     }
     setBusy(true);
     try {
-      const credential = await joinRoom({ code: roomCode, nickname });
-      storeRoomCredential(credential);
-      setRoom(credential);
-      setStatus(`Joined room ${credential.roomCode}. Waiting for the host to start.`);
+      const credential = joinAsSpectator
+        ? await createSpectatorCredential(roomCode, nickname)
+        : await joinRoom({ code: roomCode, nickname });
+      storeRoomCredential({ ...credential, nickname });
+      setRoom({
+        ...credential,
+        state: credential.state as Record<string, unknown>,
+      });
+      setStatus(`Joined room ${credential.roomCode}. Opening the room…`);
+      router.push(`/multiplayer/room/${encodeURIComponent(credential.sessionId)}`);
     } catch (error) {
       reportError(error);
     } finally {
@@ -111,6 +129,16 @@ export default function MultiplayerLobby() {
     } catch {
       setStatus("Invite links will be available when rooms are online.");
     }
+  }
+
+  function rejoinRecentRoom() {
+    const saved = readRoomCredential();
+    if (!saved) {
+      setRecentRoom(false);
+      setStatus("No saved room access is available on this device.");
+      return;
+    }
+    router.push(`/multiplayer/room/${encodeURIComponent(saved.sessionId)}`);
   }
 
   return (
@@ -185,6 +213,30 @@ export default function MultiplayerLobby() {
               </div>
             </fieldset>
 
+            {mode === "PVP_SCORE_RACE" ? (
+              <label className="mb-5 block text-xs font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+                Match length
+                <select className={`${inputClass} mt-2`} value={matchDurationMinutes} onChange={(event) => setMatchDurationMinutes(Number(event.target.value))}>
+                  {Array.from({ length: 15 }, (_, index) => index + 1).map((minutes) => <option key={minutes} value={minutes}>{minutes} minute{minutes === 1 ? "" : "s"}</option>)}
+                </select>
+              </label>
+            ) : (
+              <div className="mb-5 grid grid-cols-2 gap-3">
+                <label className="block text-xs font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+                  Rounds
+                  <select className={`${inputClass} mt-2`} value={roundCount} onChange={(event) => setRoundCount(Number(event.target.value))}>
+                    {[5, 10, 15, 20, 25, 30].map((count) => <option key={count} value={count}>{count} rounds</option>)}
+                  </select>
+                </label>
+                <label className="block text-xs font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+                  Answer timer
+                  <select className={`${inputClass} mt-2`} value={answerTimeSeconds} onChange={(event) => setAnswerTimeSeconds(Number(event.target.value) as 3 | 5 | 10 | 15)}>
+                    {([3, 5, 10, 15] as const).map((seconds) => <option key={seconds} value={seconds}>{seconds} seconds</option>)}
+                  </select>
+                </label>
+              </div>
+            )}
+
             <button disabled={busy} type="button" onClick={handleCreate} className="group relative flex min-h-12 w-full items-center justify-center gap-2 rounded-sm bg-[var(--accent-time-attack)] px-4 text-sm font-bold uppercase tracking-[0.12em] text-white transition hover:brightness-110 active:translate-y-0.5 disabled:cursor-wait disabled:opacity-60">
               {busy ? "Connecting…" : "Create room"} <ArrowUpRight size={16} aria-hidden="true" />
             </button>
@@ -192,7 +244,7 @@ export default function MultiplayerLobby() {
               <span>Room status</span><span className="inline-flex items-center gap-2"><span className="size-1.5 rounded-full bg-[var(--accent-highlight)]" /> {room ? "Ready" : "Waiting to connect"}</span>
             </div>
             <div className="mt-3 flex items-center justify-between rounded-sm border border-dashed border-white/15 px-3 py-2.5 text-xs text-[var(--text-muted)]">
-              <span className="inline-flex items-center gap-2"><Users size={14} /> {room ? `Room ${room.roomCode}` : "2–30 players"}</span>
+              <span className="inline-flex items-center gap-2"><Users size={14} /> {room ? `Room ${room.roomCode}` : "Room size set by mode"}</span>
               <button disabled={!room} type="button" onClick={copyInvite} className="inline-flex items-center gap-1.5 font-bold text-[var(--text-secondary)] hover:text-white disabled:cursor-not-allowed disabled:opacity-40" aria-label="Copy room code">
                 {copied ? <Check size={13} /> : <Copy size={13} />} {copied ? "Copied" : "Invite"}
               </button>
@@ -212,16 +264,18 @@ export default function MultiplayerLobby() {
             <div className="mb-6 flex min-h-28 flex-1 flex-col items-center justify-center rounded-sm border border-dashed border-white/15 bg-white/[0.02] px-4 text-center">
               <Wifi size={20} className="mb-2 text-[var(--text-muted)]" aria-hidden="true" />
               <p className="text-xs font-bold text-[var(--text-secondary)]">Room preview</p>
-              <p className="mt-1 text-[10px] leading-4 text-[var(--text-muted)]">Room details and player list will appear here.</p>
+              <p className="mt-1 text-[10px] leading-4 text-[var(--text-muted)]">Join as a player or follow the score and mode stats as a spectator.</p>
             </div>
+            <label className="mb-4 flex items-center gap-2 text-xs text-[var(--text-secondary)]"><input type="checkbox" checked={joinAsSpectator} onChange={(event) => setJoinAsSpectator(event.target.checked)} /> Join as a read-only spectator</label>
             <button disabled={busy} type="button" onClick={handleJoin} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-sm border border-white/80 bg-transparent px-4 text-sm font-bold uppercase tracking-[0.12em] text-white transition hover:bg-white hover:text-[var(--bg-base)] disabled:cursor-wait disabled:opacity-60">
-              {busy ? "Connecting…" : "Join room"} <ArrowUpRight size={16} aria-hidden="true" />
+              {busy ? "Connecting…" : joinAsSpectator ? "Watch room" : "Join room"} <ArrowUpRight size={16} aria-hidden="true" />
             </button>
+            {recentRoom && <button type="button" onClick={rejoinRecentRoom} className="mt-3 min-h-10 w-full text-xs font-bold uppercase tracking-[0.12em] text-[var(--accent-highlight)] hover:text-white">Rejoin your recent room</button>}
           </section>
         </div>
 
         <div aria-live="polite" className="mx-auto mt-6 min-h-6 text-center text-xs font-bold text-[var(--accent-highlight)]">{status}</div>
-        <p className="mt-2 text-center text-[10px] uppercase tracking-[0.14em] text-[var(--text-muted)]">Rooms are live · Match controls arrive in the next integration pass</p>
+        <p className="mt-2 text-center text-[10px] uppercase tracking-[0.14em] text-[var(--text-muted)]">Rooms, live matches, reconnects and spectator scoreboards are available</p>
       </section>
       <footer className="pb-2 text-center text-[10px] uppercase tracking-[0.12em] text-white/35">Higher or Lower · Party mode</footer>
     </main>

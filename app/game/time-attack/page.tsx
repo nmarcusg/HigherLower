@@ -1,8 +1,7 @@
 import { notFound, redirect } from "next/navigation";
-import { authorizeGameRoute } from "@/lib/catalog/routeAuthorization";
-import { fetchGameItems } from "@/lib/api";
+import { authorizeBackendGameRoute } from "@/lib/catalog/routeAuthorization";
+import SoloGameplayLoader from "@/lib/backend/SoloGameplayLoader";
 import DerivedGameState from "@/components/game/DerivedGameState";
-import TimeAttackGame from "@/components/game/TimeAttackGame";
 
 // ─── Inner async route authorization ─────────────────────────────────────────
 
@@ -12,7 +11,7 @@ async function TimeAttackLoader({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const { category } = await searchParams;
-  const authorization = authorizeGameRoute("time-attack", category);
+  const authorization = authorizeBackendGameRoute("time-attack", category);
 
   if (authorization.status === "missing-category") redirect("/");
   if (
@@ -27,23 +26,12 @@ async function TimeAttackLoader({
     return <DerivedGameState kind="unavailable" />;
   }
 
-  // Authorization succeeded: only now may the provider dispatcher run.
-  let items;
-  try {
-    items = await fetchGameItems(authorization.providerCategory);
-  } catch {
-    return <DerivedGameState kind="error" />;
-  }
-
-  if (items.length < 2) {
-    return <DerivedGameState kind="empty" />;
-  }
-
   return (
-    <TimeAttackGame
-      initialPool={items}
+    <SoloGameplayLoader
+      mode="time-attack"
       categoryId={authorization.category.id}
       categoryLabel={authorization.category.label}
+      providerCategory={authorization.providerCategory}
     />
   );
 }
