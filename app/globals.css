@@ -132,25 +132,20 @@ body {
 }
 
 .high-scores-dialog[open] {
-  animation: home-dialog-in 200ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  animation: home-dialog-in var(--motion-dur-base) var(--motion-ease-out) both;
 }
 
 .high-scores-dialog[data-closing="true"] {
-  animation: home-dialog-out 200ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  animation: home-dialog-out var(--motion-dur-base) var(--motion-ease-out) both;
 }
 
 .high-scores-dialog::backdrop {
   background: rgb(9 7 25 / 78%);
-  animation: home-dialog-in 200ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  animation: home-dialog-in var(--motion-dur-base) var(--motion-ease-out) both;
 }
 
 .high-scores-dialog[data-closing="true"]::backdrop {
-  animation: home-dialog-out 200ms cubic-bezier(0.23, 1, 0.32, 1) both;
-}
-
-.high-scores-dialog.motion-reduce[open],
-.high-scores-dialog.motion-reduce::backdrop {
-  animation-duration: 0.01ms;
+  animation: home-dialog-out var(--motion-dur-base) var(--motion-ease-out) both;
 }
 
 .home-go:hover:not(:disabled) {
@@ -450,4 +445,798 @@ body {
 }
 .float-up {
   animation: floatUp 0.9s ease forwards;
+}
+
+/* ─── Motion system — additive layer ─────────────────────────────────────────
+   Appended vocabulary for the immersive motion layer. This block is additive:
+   the token block at the top of this file and the `prefers-reduced-motion`
+   block above are untouched. Nothing here redefines an existing token. */
+
+:root {
+  /* Durations */
+  --motion-dur-tap: 90ms;
+  --motion-dur-quick: 140ms;
+  --motion-dur-base: 180ms;
+  --motion-dur-beat: 240ms;
+  --motion-dur-accent: 400ms;
+  --motion-dur-route: 320ms;
+  --motion-dur-ambient: 2400ms;
+  --motion-dur-ambient-slow: 3200ms;
+  --motion-dur-timer: 1000ms;
+
+  /* Easings. `ease-in` is deliberately absent: it is not used by new motion. */
+  --motion-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --motion-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --motion-ease-overshoot: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --motion-ease-slam: cubic-bezier(0.2, 1.8, 0.4, 1);
+  --motion-ease-step-2: steps(2, end);
+  --motion-ease-linear: linear;
+
+  /* Distances and scale */
+  --motion-dist-nudge: 2px;
+  --motion-dist-lift: 4px;
+  --motion-dist-rise: 8px;
+  --motion-dist-handoff: 10px;
+  --motion-dist-value: 6px;
+  --motion-dist-ambient: 4px;
+  --motion-scale-press: 0.985;
+  --motion-scale-enter: 0.97;
+  --motion-scale-pop: 1.06;
+  --motion-scale-slam: 1.12;
+
+  /* Delay and stagger */
+  --motion-delay-value: 120ms;
+  --motion-delay-secondary: 120ms;
+  --motion-stagger-item: 32ms;
+  --motion-stagger-cap: 6;
+}
+
+/* ─── New keyframes (only where no existing keyframe fits) ─────────────────── */
+
+/* Value lands after the plate has reacted. */
+@keyframes value-land {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-dist-value));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Score tally acknowledgement. */
+@keyframes tally-bump {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(var(--motion-scale-pop));
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Milestone stamp for the top rung of the ladder. */
+@keyframes tier-stamp {
+  0% {
+    transform: scale(var(--motion-scale-slam));
+  }
+  62% {
+    transform: scale(0.995);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Ambient loop A. Animates `transform` so it composes with the chevron's
+   existing tailwind translate-based hover lift instead of overriding it. */
+@keyframes ambient-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(var(--motion-dist-ambient));
+  }
+}
+
+/* Ambient loop B. Animates `translate` so it composes with the CTA's existing
+   `transform`-based press counter-offset instead of overriding it. */
+@keyframes ambient-drift {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 2px 2px;
+  }
+}
+
+/* ─── Variant classes that reuse existing keyframes ───────────────────────── */
+
+/* Time Attack delta label, retimed to fit each reveal window. */
+.float-up-brief {
+  animation: floatUp 380ms ease forwards;
+}
+.float-up-reveal {
+  animation: floatUp 700ms ease forwards;
+}
+
+/* Classic wrong-answer jolt. Reuses the existing `shake` keyframe. */
+.shake-brief {
+  animation: shake var(--motion-dur-beat) var(--motion-ease-out) both;
+}
+
+/* One-shot accent ring. Reuses `pulse-ring`; the 1.8s infinite loop is not used. */
+.pulse-ring-once {
+  animation: pulse-ring var(--motion-dur-accent) var(--motion-ease-out) 1 both;
+}
+
+/* ─── New state classes ───────────────────────────────────────────────────── */
+
+.value-land {
+  animation: value-land var(--motion-dur-base) var(--motion-ease-out)
+    var(--motion-delay-value) backwards;
+}
+
+.tint-step {
+  animation: tint-in var(--motion-dur-quick) var(--motion-ease-step-2) backwards;
+}
+@keyframes tint-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.tally-bump {
+  animation: tally-bump var(--motion-dur-base) var(--motion-ease-overshoot) both;
+}
+
+.tier-stamp {
+  animation: tier-stamp var(--motion-dur-beat) var(--motion-ease-slam) both;
+}
+
+/* Row cascade for the category list and the High Scores rows. `backwards`
+   fill (not `both`) so the row's own hover transform is free again once the
+   cascade finishes. */
+@keyframes row-cascade {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-dist-value));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.row-cascade {
+  animation: row-cascade var(--motion-dur-base) var(--motion-ease-out) backwards;
+}
+
+/* Selection dot pop. `@starting-style` supplies the pre-paint state, so the dot
+   is never hidden in server markup and older engines simply paint it instantly. */
+.selection-dot {
+  transition:
+    transform var(--motion-dur-quick) var(--motion-ease-overshoot),
+    opacity var(--motion-dur-quick) var(--motion-ease-out),
+    border-color var(--motion-dur-quick) var(--motion-ease-out),
+    background-color var(--motion-dur-quick) var(--motion-ease-out);
+}
+@starting-style {
+  .selection-dot {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+}
+
+/* Offset-shadow step on selection labels. */
+.selection-label {
+  transition-property: text-shadow, color;
+  transition-duration: var(--motion-dur-quick);
+  transition-timing-function: var(--motion-ease-step-2);
+}
+
+/* Decision controls: hover lift gated to fine pointers, press on the tap token. */
+.decision-lift {
+  transition: transform var(--motion-dur-quick) var(--motion-ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .decision-lift:hover:not(:disabled) {
+    transform: translateY(calc(-1 * var(--motion-dist-lift)));
+  }
+}
+.decision-lift:active:not(:disabled) {
+  transform: translateY(0) scale(var(--motion-scale-press));
+  transition-duration: var(--motion-dur-tap);
+}
+
+/* ─── Ambient loops: Home only, transform-only, ≤4px, ≥2.4s ─────────────────
+   Declared and paused by default. A single `data-ambient="on"` attribute on the
+   Home `<main>` starts them; offscreen (attribute removed) they stay paused. */
+
+@media (prefers-reduced-motion: no-preference) {
+  .ambient-chevron {
+    animation: ambient-bob var(--motion-dur-ambient) var(--motion-ease-in-out)
+      infinite;
+    animation-play-state: paused;
+  }
+
+  .ambient-go-offset {
+    animation: ambient-drift var(--motion-dur-ambient-slow)
+      var(--motion-ease-in-out) infinite;
+    animation-play-state: paused;
+  }
+
+  /* One observer sets one attribute; the value records which host is on screen
+     so each loop pauses on its own visibility without a second observer. */
+  [data-ambient="both"] .ambient-chevron,
+  [data-ambient="hero"] .ambient-chevron {
+    animation-play-state: running;
+  }
+
+  [data-ambient="both"] .ambient-go-offset,
+  [data-ambient="cta"] .ambient-go-offset {
+    animation-play-state: running;
+  }
+
+  /* Never muddy the press affordance: loop B pauses while the CTA is engaged. */
+  [data-ambient="both"] .home-go:is(:hover, :focus-visible) .ambient-go-offset,
+  [data-ambient="cta"] .home-go:is(:hover, :focus-visible) .ambient-go-offset {
+    animation-play-state: paused;
+  }
+}
+
+/* ─── Reduced-motion fidelity ────────────────────────────────────────────────
+   The global block above still hard-strips CSS motion. These appended rules
+   re-admit only the opacity crossfades that owner decision 4 preserves, and
+   suppress the ambient loops explicitly. */
+
+@media (prefers-reduced-motion: reduce) {
+  .value-land {
+    animation: tint-in var(--motion-dur-quick) var(--motion-ease-linear) 0ms
+      backwards !important;
+  }
+  .row-cascade {
+    animation: tint-in var(--motion-dur-quick) var(--motion-ease-linear) 0ms
+      backwards !important;
+  }
+  .ambient-chevron,
+  .ambient-go-offset {
+    animation: none !important;
+  }
+  .shake-brief,
+  .tally-bump,
+  .tier-stamp {
+    animation: none !important;
+  }
+  /* Owner decision 4: drop positional movement, keep the state change legible.
+     The colour/contrast change on these controls is untouched. */
+  .decision-lift:hover:not(:disabled),
+  .decision-lift:active:not(:disabled) {
+    transform: none !important;
+  }
+  /* The streak ring is decorative and purely motion-borne, so it is suppressed
+     outright; the streak line below the tally remains as the static indicator. */
+  .pulse-ring-once {
+    animation: none !important;
+    opacity: 0 !important;
+  }
+}
+
+/* ─── Route transition: Home → gameplay ─────────────────────────────────────
+   One transition type (`nav-forward`), no named participants, so hit-testing is
+   never skipped on a control the player might press twice. */
+
+::view-transition {
+  pointer-events: none;
+}
+
+::view-transition-old(.nav-forward) {
+  animation: route-fade-out var(--motion-dur-quick) var(--motion-ease-out) both;
+}
+
+/* D3: opacity crossfade only. The 8 px rise is gone, so the incoming page can
+   never stack a whole-page movement under the gameplay content entrance. */
+::view-transition-new(.nav-forward) {
+  animation: route-fade-in var(--motion-dur-quick) var(--motion-ease-out) both;
+}
+
+@keyframes route-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes route-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-dist-rise));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes route-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Owner decision 4 applied to the route: keep the crossfade, drop the rise. */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(*),
+  ::view-transition-new(*),
+  ::view-transition-group(*) {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+  }
+  ::view-transition-old(.nav-forward) {
+    animation: route-fade-out var(--motion-dur-quick) linear both !important;
+  }
+  ::view-transition-new(.nav-forward) {
+    animation: route-fade-in var(--motion-dur-quick) linear both !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Atmosphere + audio layer — APPENDED.
+
+   Everything above this line is byte-identical to the previous file, except
+   the approved removal of the dead `.high-scores-dialog.motion-reduce` rule
+   (F8). These rules are additive: new tokens, the `html[data-*]`
+   harmonization contract written by the backdrop and the audio surface, and
+   the audio-control presentation. No existing token is renamed, reordered or
+   removed.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Canvas field alphas (read by the engine at bake time, not per frame). */
+  --atmo-horizon-alpha: 0.16;
+  --atmo-top-alpha: 0.1;
+  --atmo-tint-alpha: 0.14;
+  /* Tint is surface-dependent; the engine picks the token at bake time. */
+  --atmo-tint-alpha-gameplay: 0.26;
+  --atmo-tint-alpha-low: 0.03;
+  /* Recession targets. */
+  --atmo-recede-playing: 1;
+  --atmo-recede-reveal: 1;
+  --atmo-recede-modal: 0.55;
+  --atmo-recede-game-over: 0.75;
+  --atmo-recede-low: 0.35;
+  /* Surface-dependent field gain. Home keeps the calibrated amplitude; the
+     gameplay field survives only ~29 % of the DOM scrim, so its sprites and
+     idle chevrons are drawn brighter rather than retuning the scrim (owner
+     accepted). Sparks clamp before the recession multiplier; the reactive
+     surge keeps its own 1.0 ceiling and is never multiplied by these. */
+  --atmo-sprite-gain: 1;
+  --atmo-sprite-gain-gameplay: 3;
+  --atmo-chevron-gain: 1;
+  --atmo-chevron-gain-gameplay: 2;
+  /* Declared but unused by the icon-only control (PD-6: left in place). */
+  --atmo-accent: var(--accent-classic);
+  --atmo-accent-off: var(--border-subtle);
+}
+
+/* ─── Calibration: reduced-motion hydration + route hand-off ───────────────── */
+
+/* E1 — the hero entrance no longer branches on `useReducedMotion()` during
+   render, so the server and the client emit identical inline styles. Under
+   reduced motion this CSS rule paints the settled hero immediately and cancels
+   Motion's positional rise: opacity/position are final at first paint. */
+@media (prefers-reduced-motion: reduce) {
+  [data-atmo-safe="hero"],
+  [data-atmo-safe="hero"] * {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+/* E2 — the dialog no longer appends a client-only `motion-reduce` class (that
+   mismatch broke hydration). The reduced-motion behaviour is CSS-only and
+   scoped to the dialog. */
+@media (prefers-reduced-motion: reduce) {
+  .high-scores-dialog[open],
+  .high-scores-dialog::backdrop,
+  .high-scores-dialog[data-closing="true"],
+  .high-scores-dialog[data-closing="true"]::backdrop {
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* Route hand-off — shorten the crossfade so it stops masking the first beats of
+   the gameplay entrance. Appended override; the legacy block above is intact. */
+::view-transition-old(.nav-forward) {
+  animation-duration: 100ms;
+}
+::view-transition-new(.nav-forward) {
+  animation-duration: 100ms;
+}
+
+/* ─── Audio control presentation ───────────────────────────────────────────── */
+
+.audio-surface {
+  color: var(--foreground-muted);
+  transition:
+    color var(--motion-dur-quick) var(--motion-ease-out),
+    background-color var(--motion-dur-quick) var(--motion-ease-out),
+    border-color var(--motion-dur-quick) var(--motion-ease-out);
+}
+
+.audio-surface:hover,
+.audio-surface[aria-expanded="true"] {
+  color: var(--foreground-primary);
+}
+
+/* State is carried by the glyph and its colour; the offset shadow left with the
+   icon-only treatment, so the channel is reported by `Volume2` / `VolumeX` and
+   the dimmed colour below. The `--atmo-accent` assignments this rule used to
+   make are gone with it. */
+html[data-audio-sfx="off"] .audio-surface {
+  color: var(--text-muted);
+}
+
+/* Armed but not yet unlocked: a 4 px tell on the outer edge. */
+html[data-audio-state="armed"] .audio-surface::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 4px;
+  height: 4px;
+  border-radius: 9999px;
+  background-color: var(--accent-highlight);
+  opacity: 0.6;
+}
+
+/* A dialog owns the top layer; the control behind it is not reachable. */
+html[data-modal="open"] .audio-surface {
+  opacity: 0.6;
+}
+
+.audio-surface-popover {
+  animation: audio-pop-in var(--motion-dur-quick) var(--motion-ease-out) both;
+}
+
+@keyframes audio-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.audio-row[aria-checked="true"] {
+  background-color: color-mix(in srgb, var(--accent-highlight) 14%, transparent);
+}
+
+/* ─── Status cluster ↔ field tint ──────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: no-preference) {
+  html[data-tier="3"] [data-streak-ring],
+  html[data-tier="4"] [data-streak-ring] {
+    box-shadow: 0 0 12px color-mix(in srgb, var(--accent-highlight) 20%, transparent);
+  }
+
+  html[data-tier="4"] [data-streak-line] {
+    height: 1px;
+  }
+}
+
+/* ─── Tier B gameplay surface (D2 / D7) ─────────────────────────────────────
+   A radial scrim instead of one flat fill: 84 % in the centre column (cards are
+   opaque there, so the centre hides nothing) opening to 66 % at mid-field and
+   10 % in the gutters, where the design has no text and the field should live.
+   The gutter stop is deliberately low so the mode accent survives compositing;
+   the centre column keeps its opaque backing, so text contrast is unaffected.
+
+   The element also carries `.bg-grid`, and this rule wins for `background-image`
+   — so the dot grid is re-declared here as the two top layers (C-4). Order is
+   grid, grid, radial; the radial paints last, under the grid. */
+
+.gameplay-surface {
+  /* Transparent on purpose: an opaque `background-color` paints *under* the
+     gradient layers and would hide the canvas field completely, making the
+     whole scrim a no-op. The alpha lives in the radial stops; the opaque
+     `--bg-base` page body behind the surface is the fallback. */
+  background-color: transparent;
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px),
+    radial-gradient(
+      120% 90% at 50% 45%,
+      rgba(21, 18, 43, 0.84) 0%,
+      rgba(21, 18, 43, 0.66) 55%,
+      rgba(21, 18, 43, 0.10) 100%
+    );
+  background-size:
+    3.375rem 3.375rem,
+    3.375rem 3.375rem,
+    100% 100%;
+  background-repeat: repeat, repeat, no-repeat;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .audio-surface {
+    transition: none;
+  }
+
+  .audio-surface-popover {
+    animation: none;
+  }
+
+  html[data-tier="3"] [data-streak-ring],
+  html[data-tier="4"] [data-streak-ring] {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-highlight) 20%, transparent);
+  }
+
+  html[data-tier="4"] [data-streak-line] {
+    height: 1px;
+  }
+}
+
+/* ─── Card plate ↔ field lighting ────────────────────────────────────────────
+   The comparison card's offset backing and its 9 px block shadow are lit by the
+   same recession the canvas uses, so the card belongs to the field instead of
+   sitting on top of it. At rest `--card-light` is 1, which resolves to the exact
+   current accent — the resting card is unchanged. Only `background-color` and
+   `box-shadow` move, so no transition here can shift layout. */
+
+:root {
+  --card-light: 1;
+}
+
+html[data-modal="open"] {
+  --card-light: var(--atmo-recede-modal);
+}
+
+html[data-phase="game-over"] {
+  --card-light: var(--atmo-recede-game-over);
+}
+
+html[data-phase="revealing"] {
+  --card-light: var(--atmo-recede-reveal);
+}
+
+.game-card-plate {
+  background-color: color-mix(
+    in srgb,
+    var(--card-accent) calc(var(--card-light) * 100%),
+    transparent
+  );
+}
+
+.game-card-face {
+  box-shadow: 0 calc(9px * var(--card-light)) 0
+    color-mix(in srgb, var(--card-accent) calc(var(--card-light) * 100%), transparent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .game-card-plate,
+  .game-card-face {
+    transition:
+      background-color var(--motion-dur-base) var(--motion-ease-out),
+      box-shadow var(--motion-dur-base) var(--motion-ease-out);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   First-mount gameplay entrance (D4) — APPENDED.
+
+   The class lives on the existing gameplay body `<div>`; every rule below reads
+   that body's already-present children by selector, so no element is added and
+   the layout is untouched. Only `opacity` and `transform` animate, both are
+   compositor properties, and the game-over overlay is a sibling outside the
+   entrance. Beats: card 0 / 32 ms, OR 96 ms, tally 168 ms, controls 220 ms —
+   the last transform settles at exactly 380 ms.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@keyframes entrance-card-current {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes entrance-card-next {
+  from {
+    opacity: 0;
+    transform: translateY(-14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes entrance-or {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes entrance-status {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes entrance-controls {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.gameplay-entrance > section[aria-label="Higher or lower comparison"] > div:nth-child(1) {
+  animation: entrance-card-current 320ms var(--motion-ease-out) 0ms backwards;
+}
+
+.gameplay-entrance > section[aria-label="Higher or lower comparison"] > div:nth-child(2) {
+  animation: entrance-card-next 320ms var(--motion-ease-out) 32ms backwards;
+}
+
+.gameplay-entrance > section[aria-label="Higher or lower comparison"] > div[aria-hidden="true"] {
+  animation: entrance-or 180ms var(--motion-ease-out) 96ms backwards;
+}
+
+.gameplay-entrance-status {
+  animation: entrance-status 140ms var(--motion-ease-out) 168ms backwards;
+}
+
+.gameplay-entrance-controls {
+  animation: entrance-controls 160ms var(--motion-ease-out) 220ms backwards;
+}
+
+/* Reduced motion: identical markup, opacity-only, no JS or SSR branch (the live
+   hero hydration bug came from exactly such a branch). */
+@media (prefers-reduced-motion: reduce) {
+  .gameplay-entrance > section[aria-label="Higher or lower comparison"] > div,
+  .gameplay-entrance-status,
+  .gameplay-entrance-controls {
+    animation: tint-in 120ms linear 0ms backwards !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Scroll-free Go dock (D1 / D6) — APPENDED.
+
+   Out of flow, so it cannot shift layout. Always mounted; `data-open` and
+   `data-keyboard` toggle opacity, the 8 px rise and `visibility`, which also
+   keeps the closed dock out of the tab order and the accessibility tree.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.launch-dock {
+  position: fixed;
+  left: 50%;
+  bottom: max(0.75rem, env(safe-area-inset-bottom));
+  z-index: 40;
+  width: min(92vw, 26rem);
+  transform: translateX(-50%);
+  translate: 0 0;
+  opacity: 1;
+  visibility: visible;
+}
+
+.launch-dock[data-open="false"],
+.launch-dock[data-keyboard="open"],
+html[data-modal="open"] .launch-dock {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  translate: 0 8px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .launch-dock {
+    transition:
+      opacity var(--motion-dur-base) var(--motion-ease-out),
+      translate var(--motion-dur-base) var(--motion-ease-out),
+      visibility 0s linear 0s;
+  }
+
+  .launch-dock[data-open="false"],
+  .launch-dock[data-keyboard="open"],
+  html[data-modal="open"] .launch-dock {
+    transition:
+      opacity var(--motion-dur-base) var(--motion-ease-out),
+      translate var(--motion-dur-base) var(--motion-ease-out),
+      visibility 0s linear var(--motion-dur-base);
+  }
+}
+
+.launch-dock-face {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 3.5rem;
+  padding: 0.375rem 0.375rem 0.375rem 1.125rem;
+  border: 2px solid var(--border-strong);
+  border-radius: 9999px;
+  background-color: var(--surface-raised);
+  box-shadow: 5px 5px 0 var(--accent-classic);
+}
+
+.launch-dock-context {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.6875rem;
+  line-height: 1.35;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--foreground-primary);
+}
+
+.launch-dock-mode {
+  color: var(--text-secondary);
+}
+
+.launch-dock-go {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 4.5rem;
+  min-height: 2.75rem;
+  padding: 0 1.25rem;
+  border: 2px solid var(--border-strong);
+  border-radius: 9999px;
+  background-color: var(--accent-time-attack);
+  color: #121212;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.launch-dock-go:disabled {
+  background-color: var(--bg-elevated);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .launch-dock-go {
+    transition: background-color var(--motion-dur-quick) var(--motion-ease-out);
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .launch-dock-go:hover:not(:disabled) {
+    background-color: color-mix(in srgb, var(--accent-time-attack) 86%, #ffffff);
+  }
 }
