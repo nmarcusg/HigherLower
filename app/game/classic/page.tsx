@@ -1,8 +1,7 @@
 import { notFound, redirect } from "next/navigation";
-import { authorizeGameRoute } from "@/lib/catalog/routeAuthorization";
-import { fetchGameItems } from "@/lib/api";
+import { authorizeBackendGameRoute } from "@/lib/catalog/routeAuthorization";
+import SoloGameplayLoader from "@/lib/backend/SoloGameplayLoader";
 import DerivedGameState from "@/components/game/DerivedGameState";
-import ClassicGame from "@/components/game/ClassicGame";
 
 // ─── Inner async component (reads and authorizes searchParams) ────────────────
 
@@ -12,7 +11,7 @@ async function ClassicGameLoader({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const { category } = await searchParams;
-  const authorization = authorizeGameRoute("classic", category);
+  const authorization = authorizeBackendGameRoute("classic", category);
 
   if (authorization.status === "missing-category") redirect("/");
   if (
@@ -27,23 +26,12 @@ async function ClassicGameLoader({
     return <DerivedGameState kind="unavailable" />;
   }
 
-  // Authorization succeeded: only now may the provider dispatcher run.
-  let items;
-  try {
-    items = await fetchGameItems(authorization.providerCategory);
-  } catch {
-    return <DerivedGameState kind="error" />;
-  }
-
-  if (items.length < 2) {
-    return <DerivedGameState kind="empty" />;
-  }
-
   return (
-    <ClassicGame
-      initialPool={items}
+    <SoloGameplayLoader
+      mode="classic"
       categoryId={authorization.category.id}
       categoryLabel={authorization.category.label}
+      providerCategory={authorization.providerCategory}
     />
   );
 }

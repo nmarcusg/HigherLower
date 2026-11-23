@@ -5,8 +5,10 @@ import {
   useMemo,
   useRef,
   useState,
+  type RefObject,
   useSyncExternalStore,
 } from "react";
+import { useReducedMotion } from "motion/react";
 import { AlertTriangle, Trophy, X } from "lucide-react";
 import { SEMANTIC_CATEGORIES } from "@/lib/catalog/semanticCatalog";
 import type { HighScoreMode } from "@/lib/highScores/types";
@@ -19,10 +21,13 @@ import {
   migrateLegacyHighScores,
   subscribeHighScores,
 } from "@/lib/highScores/storage";
+import { emitAtmosphere } from "@/lib/atmosphere/eventBus";
+import { rectOf } from "@/lib/atmosphere/delegation";
 
 interface HighScoresModalProps {
   open: boolean;
   onClose: () => void;
+  openerRef: RefObject<HTMLButtonElement | null>;
 }
 
 const MODES: readonly { id: HighScoreMode; label: string }[] = [
@@ -37,15 +42,21 @@ const SEMANTIC_CATEGORY_BY_ID = new Map(
 export default function HighScoresModal({
   open,
   onClose,
+  openerRef,
 }: HighScoresModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const prefersReducedMotion = useReducedMotion();
+  const wasOpen = useRef(false);
+  const closing = useRef(false);
+  const closeTimer = useRef<number | null>(null);
   const [mode, setMode] = useState<HighScoreMode>("classic");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [showClearConfirmation, setShowClearConfirmation] = useState(false);
   const [showLeaderboardConfirmation, setShowLeaderboardConfirmation] =
     useState(false);
   const [announcement, setAnnouncement] = useState("");
+  const [isClosing, setIsClosing] = useState(false);
   const storageSnapshot = useSyncExternalStore(
     subscribeHighScores,
     getHighScoreStorageSnapshot,
@@ -60,12 +71,37 @@ export default function HighScoresModal({
     const dialog = dialogRef.current;
     if (!dialog) return;
     if (open && !dialog.open) {
+      if (closeTimer.current !== null) {
+        window.clearTimeout(closeTimer.current);
+        closeTimer.current = null;
+      }
       dialog.showModal();
+      wasOpen.current = true;
+      closing.current = false;
+      setIsClosing(false);
       closeButtonRef.current?.focus();
-    } else if (!open && dialog.open) {
-      dialog.close();
+      // Approved allowlist expansion: the dialog's own open/close is the only
+      // reliable signal for Escape, `onCancel` and a backdrop close.
+      emitAtmosphere({
+        type: "modal",
+        state: "open",
+        opener: rectOf(openerRef.current),
+      });
+    } else if (!open && dialog.open && !closing.current) {
+      closing.current = true;
+      setIsClosing(true);
+      emitAtmosphere({
+        type: "modal",
+        state: "closed",
+        opener: rectOf(openerRef.current),
+      });
+      if (prefersReducedMotion) dialog.close();
+      else closeTimer.current = window.setTimeout(() => {
+        closeTimer.current = null;
+        dialog.close();
+      }, 200);
     }
-  }, [open]);
+  }, [open, prefersReducedMotion, openerRef]);
 
   useEffect(() => {
     if (!open) return;
@@ -108,6 +144,21 @@ export default function HighScoresModal({
 
   function handleClose() {
     setShowClearConfirmation(false);
+    if (dialogRef.current?.open && !closing.current) {
+      closing.current = true;
+      setIsClosing(true);
+      // The single funnel for X, Escape (`onCancel`) and a backdrop click.
+      emitAtmosphere({
+        type: "modal",
+        state: "closed",
+        opener: rectOf(openerRef.current),
+      });
+      if (prefersReducedMotion) dialogRef.current.close();
+      else closeTimer.current = window.setTimeout(() => {
+        closeTimer.current = null;
+        dialogRef.current?.close();
+      }, 200);
+    }
     onClose();
   }
 
@@ -131,9 +182,19 @@ export default function HighScoresModal({
         handleClose();
       }}
       onClose={() => {
-        if (open) handleClose();
+        closing.current = false;
+        setIsClosing(false);
+        if (wasOpen.current) {
+          wasOpen.current = false;
+          openerRef.current?.focus();
+        }
+        if (open) onClose();
       }}
-      className="m-auto max-h-[min(90dvh,52rem)] w-[min(94vw,48rem)] overflow-y-auto border-2 border-white bg-[var(--surface-background)] p-0 text-[var(--foreground-primary)] shadow-[10px_10px_0_var(--accent-classic)] backdrop:bg-[#090719]/85 backdrop:backdrop-blur-sm"
+      onClick={(event) => {
+        if (event.target === dialogRef.current) handleClose();
+      }}
+      data-closing={isClosing || undefined}
+      className="high-scores-dialog m-auto max-h-[min(90dvh,52rem)] w-[min(94vw,48rem)] overflow-y-auto border-2 border-white bg-[var(--surface-background)] p-0 text-[var(--foreground-primary)] shadow-[10px_10px_0_var(--accent-classic)]"
     >
       <div className="p-5 sm:p-8">
         <header className="flex items-start justify-between gap-4">
@@ -163,7 +224,7 @@ export default function HighScoresModal({
             type="button"
             onClick={handleClose}
             aria-label="Close High Scores"
-            className="inline-flex size-11 shrink-0 items-center justify-center border-2 border-white text-white transition-colors hover:bg-white/10"
+            className="inline-flex size-11 shrink-0 cursor-pointer items-center justify-center border-2 border-white text-white transition-colors hover:bg-white/10"
           >
             <X aria-hidden="true" size={18} />
           </button>
@@ -173,6 +234,39 @@ export default function HighScoresModal({
           className="mt-7 grid grid-cols-2 border-b-2 border-white"
           role="tablist"
           aria-label="High Score mode"
+          onKeyDown={(event) => {
+            const tabs = Array.from(
+              event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                '[role="tab"]',
+              ),
+            );
+            const currentIndex = tabs.indexOf(
+              event.target as HTMLButtonElement,
+            );
+            if (currentIndex === -1) return;
+
+            let nextIndex: number | undefined;
+            switch (event.key) {
+              case "ArrowRight":
+                nextIndex = (currentIndex + 1) % tabs.length;
+                break;
+              case "ArrowLeft":
+                nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+                break;
+              case "Home":
+                nextIndex = 0;
+                break;
+              case "End":
+                nextIndex = tabs.length - 1;
+                break;
+              default:
+                return;
+            }
+
+            event.preventDefault();
+            tabs[nextIndex].focus();
+            setMode(MODES[nextIndex].id);
+          }}
         >
           {MODES.map((option) => (
             <button
@@ -181,9 +275,10 @@ export default function HighScoresModal({
               type="button"
               role="tab"
               aria-selected={mode === option.id}
+              tabIndex={mode === option.id ? 0 : -1}
               aria-controls="high-scores-panel"
               onClick={() => setMode(option.id)}
-              className={`min-h-12 border-x-2 border-t-2 border-white px-3 py-2 text-xs font-bold uppercase tracking-[0.12em] transition-colors sm:text-sm ${mode === option.id ? "bg-[var(--accent-classic)] text-white" : "text-[var(--foreground-muted)] hover:bg-white/10"}`}
+              className={`min-h-12 cursor-pointer border-x-2 border-t-2 border-white px-3 py-2 text-xs font-bold uppercase tracking-[0.12em] transition-colors sm:text-sm ${mode === option.id ? "bg-[var(--accent-classic)]/22 text-white" : "text-[var(--foreground-muted)] hover:bg-white/10 hover:text-white"}`}
             >
               {option.label}
             </button>
@@ -198,26 +293,37 @@ export default function HighScoresModal({
         >
           <label className="mb-4 grid gap-2 text-xs font-bold uppercase tracking-[0.1em] text-[var(--foreground-muted)]">
             Filter by category
-            <select
-              aria-label="Filter by semantic category"
-              value={categoryFilter}
-              onChange={(event) => setCategoryFilter(event.target.value)}
-              className="min-h-11 w-full border-2 border-white bg-[var(--surface-background)] px-3 text-sm text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring)]"
-            >
-              <option value="all">All categories</option>
-              {SEMANTIC_CATEGORIES.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.label}
-                </option>
-              ))}
-            </select>
+            <span className="relative block">
+              <select
+                aria-label="Filter by semantic category"
+                value={categoryFilter}
+                onChange={(event) => setCategoryFilter(event.target.value)}
+                className="min-h-11 w-full cursor-pointer appearance-none border-2 border-white bg-[var(--surface-background)] py-2 pl-3 pr-11 text-sm text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring)]"
+              >
+                <option value="all">All categories</option>
+                {SEMANTIC_CATEGORIES.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.label}
+                  </option>
+                ))}
+              </select>
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-white"
+              >
+                <svg viewBox="0 0 16 16" className="size-4 fill-none stroke-current" strokeWidth="1.75">
+                  <path d="m3.5 6 4.5 4 4.5-4" />
+                </svg>
+              </span>
+            </span>
           </label>
           {scores.length > 0 ? (
             <ol className="grid gap-3">
               {scores.map((record, index) => (
                 <li
                   key={`${record.mode}:${record.categoryId}`}
-                  className="grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 py-3 sm:px-4"
+                  className="row-cascade grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 py-3 sm:px-4"
+                  style={{ animationDelay: `${Math.min(index, 5) * 32}ms` }}
                 >
                   <span className="grid size-7 place-items-center border border-white/50 text-xs font-bold text-[var(--accent-highlight)]">
                     {index + 1}
@@ -270,7 +376,7 @@ export default function HighScoresModal({
                   <button
                     type="button"
                     onClick={() => setShowLeaderboardConfirmation(true)}
-                    className="min-h-11 border-2 border-[var(--status-error)] px-4 py-2 text-xs font-bold uppercase tracking-[0.1em] text-[var(--status-error)] transition-colors hover:bg-[var(--status-error)]/10"
+                    className="min-h-11 cursor-pointer border-2 border-[var(--status-error)] px-4 py-2 text-xs font-bold uppercase tracking-[0.1em] text-[var(--status-error)] transition-colors hover:bg-[var(--status-error)]/10"
                   >
                     Clear this leaderboard
                   </button>
@@ -288,7 +394,7 @@ export default function HighScoresModal({
                       <button
                         type="button"
                         onClick={() => setShowLeaderboardConfirmation(false)}
-                        className="min-h-11 border-2 border-white px-4 py-2 text-xs font-bold uppercase"
+                        className="min-h-11 cursor-pointer border-2 border-white px-4 py-2 text-xs font-bold uppercase"
                       >
                         Cancel
                       </button>
@@ -307,7 +413,7 @@ export default function HighScoresModal({
                               : "The selected leaderboard could not be cleared.",
                           );
                         }}
-                        className="min-h-11 border-2 border-white bg-[var(--status-error)] px-4 py-2 text-xs font-bold uppercase text-white"
+                        className="min-h-11 cursor-pointer border-2 border-white bg-[var(--status-error)] px-4 py-2 text-xs font-bold uppercase text-white"
                       >
                         Confirm clear
                       </button>
@@ -321,7 +427,7 @@ export default function HighScoresModal({
             <button
               type="button"
               onClick={() => setShowClearConfirmation(true)}
-              className="min-h-11 border-2 border-[var(--status-error)] px-4 py-2 text-xs font-bold uppercase tracking-[0.1em] text-[var(--status-error)] transition-colors hover:bg-[var(--status-error)]/10"
+              className="min-h-11 cursor-pointer border-2 border-[var(--status-error)] px-4 py-2 text-xs font-bold uppercase tracking-[0.1em] text-[var(--status-error)] transition-colors hover:bg-[var(--status-error)]/10"
             >
               Clear all High Scores
             </button>
@@ -354,14 +460,14 @@ export default function HighScoresModal({
                 <button
                   type="button"
                   onClick={() => setShowClearConfirmation(false)}
-                  className="min-h-11 border-2 border-white px-4 py-2 text-xs font-bold uppercase"
+                  className="min-h-11 cursor-pointer border-2 border-white px-4 py-2 text-xs font-bold uppercase transition-colors hover:bg-white/10 hover:text-white"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   onClick={handleConfirmClearAll}
-                  className="min-h-11 border-2 border-white bg-[var(--status-error)] px-4 py-2 text-xs font-bold uppercase text-white"
+                  className="min-h-11 cursor-pointer border-2 border-white bg-[var(--status-error)] px-4 py-2 text-xs font-bold uppercase text-white transition-colors hover:bg-[var(--status-error)]/80 hover:text-white"
                 >
                   Confirm clear all
                 </button>

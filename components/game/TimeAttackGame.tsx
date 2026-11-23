@@ -7,6 +7,14 @@
  *   - Wrong guess   → −5 s penalty (clamped ≥ 0), 400 ms shake+flash then
  *     advance immediately (game does NOT end on wrong answers).
  *   - Timer hits 0  → game over modal ("Time's Up!").
+ *
+ * Deck system (remaining-pool model):
+ *   - `deck` is the ordered queue of items not yet shown this session.
+ *   - `seenIds` persists for the entire timed run: an item ID cannot repeat
+ *     during the same session.
+ *   - If the entire available pool is genuinely exhausted before the timer
+ *     reaches zero, the run ends cleanly via the existing game-over path.
+ *     Items are never recycled merely to keep the timer running.
  */
 
 "use client";
@@ -27,13 +35,19 @@ import GameplayShell from "@/components/game/GameplayShell";
 import ComparisonBoard from "@/components/game/ComparisonBoard";
 import GameplayDivider from "@/components/game/GameplayDivider";
 import DecisionControls from "@/components/game/DecisionControls";
-import GameplayStatus from "@/components/game/GameplayStatus";
+import GameplayStatus, {
+  type IntensityTier,
+} from "@/components/game/GameplayStatus";
 import DerivedGameState from "@/components/game/DerivedGameState";
+import { GameplayEntranceStatus } from "@/components/game/GameplayEntrance";
 import {
   readHighScore,
   subscribeHighScores,
   writeHighScore,
 } from "@/lib/highScores/storage";
+import { buildDeck, shuffleDeck } from "@/lib/game/deck";
+import { emitAtmosphere } from "@/lib/atmosphere/eventBus";
+import { gameplayStatusOrigin, originFor } from "@/lib/atmosphere/delegation";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -48,6 +62,19 @@ const REVEAL_MS_WRONG = 400;
 type GamePhase = "playing" | "revealing" | "game-over";
 type ResultTint = "correct" | "incorrect" | null;
 
+/**
+ * Display-only reward ladder, identical thresholds to Classic but read from the
+ * cumulative correct count. Deliberately NOT a consecutive-correct combo: that
+ * would be new display state, which is out of scope for this pass.
+ */
+function resolveTier(score: number, isNewBest: boolean): IntensityTier {
+  if (score >= 5 || (isNewBest && score >= 3)) return 4;
+  if (score >= 3) return 3;
+  if (score === 2) return 2;
+  if (score === 1) return 1;
+  return 0;
+}
+
 interface TimeAttackGameProps {
   initialPool: GameItem[];
   categoryId: SemanticCategoryId;
@@ -56,48 +83,23 @@ interface TimeAttackGameProps {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function shuffle<T>(arr: T[]): T[] {
-  const copy = [...arr];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-}
-
-function dedupeAdjacentEquals(arr: GameItem[]): GameItem[] {
-  const out = [...arr];
-  for (let i = 0; i < out.length - 1; i++) {
-    if (out[i].value === out[i + 1].value) {
-      let j = i + 2;
-      while (j < out.length && out[j].value === out[i].value) j++;
-      if (j < out.length) [out[i + 1], out[j]] = [out[j], out[i + 1]];
-    }
-  }
-  return out;
-}
-
-/**
- * Build a clean, tie-free deck from the server pool. The server already
- * shuffles the pool per request, so the initial deck preserves that order to
- * keep server and client render identical (avoids a hydration mismatch).
- * `shuffleDeck` is used for explicit re-shuffles such as "Play again".
- */
-function buildDeck(pool: GameItem[]): GameItem[] {
-  return dedupeAdjacentEquals(
-    pool.filter((item) => !!item.imageUrl && !!item.name),
-  );
-}
-
-/** Shuffle a pool into a fresh deck (used for explicit restarts). */
-function shuffleDeck(pool: GameItem[]): GameItem[] {
-  return dedupeAdjacentEquals(
-    shuffle(pool.filter((item) => !!item.imageUrl && !!item.name)),
-  );
-}
-
 // Pad a number to 2 digits
 const pad2 = (n: number) => String(Math.max(0, Math.floor(n))).padStart(2, "0");
+
+function shouldIgnoreShortcut(e: KeyboardEvent) {
+  if (document.querySelector('[role="dialog"], dialog[open], [aria-modal="true"]')) {
+    return true;
+  }
+
+  const target = e.target;
+  if (!(target instanceof Element)) return false;
+
+  return Boolean(
+    target.closest(
+      'input, textarea, select, [contenteditable], button, a[href], summary, [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="switch"], [role="tab"], [role="menuitem"], [role="combobox"]',
+    ),
+  );
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -108,7 +110,8 @@ export default function TimeAttackGame({
 }: TimeAttackGameProps) {
   // ── Deck ───────────────────────────────────────────────────────────────────
   const [deck, setDeck] = useState<GameItem[]>(() => buildDeck(initialPool));
-  const [spent, setSpent] = useState<GameItem[]>([]);
+  // IDs consumed during this session. Persists for the whole timed run.
+  const [seenIds, setSeenIds] = useState<Set<string | number>>(() => new Set());
 
   const currentItem = deck[0];
   const nextItem = deck[1];
@@ -118,6 +121,14 @@ export default function TimeAttackGame({
   const [score, setScore] = useState(0);
   const [tint, setTint] = useState<ResultTint>(null);
   const [shaking, setShaking] = useState(false);
+  const gameOverActionRef = useRef<HTMLButtonElement>(null);
+  const gameOverDialogRef = useRef<HTMLDivElement>(null);
+  const gameOverOriginRef = useRef<HTMLElement | null>(null);
+  const previousPhaseRef = useRef<GamePhase>(phase);
+
+  // Handoff gate (see ClassicGame): captured once in state, never on first paint.
+  const [openingItemId] = useState(() => currentItem?.id);
+  const enterHandoff = currentItem?.id !== openingItemId;
 
   // ── Timer (ref = source of truth; state = display) ─────────────────────────
   const timerRef = useRef(INITIAL_TIME);
@@ -134,6 +145,9 @@ export default function TimeAttackGame({
   const deltaKeyRef = useRef(0);
 
   const guessLocked = useRef(false);
+  // Set only around a keyboard-initiated guess, so the emitted `source` is
+  // exact. Informational only: no gameplay state changes.
+  const guessSourceRef = useRef<"pointer" | "keyboard" | null>(null);
 
   // Guards the one-time high-score write for a completed run. The write is a
   // side effect and must not run during render (see the game-over effect).
@@ -149,6 +163,20 @@ export default function TimeAttackGame({
     () => 0,
   );
 
+  // The tally is a reveal beat (design §4.3 t1), matching Classic. `score` is
+  // still written only by the untouched 800 ms advance, so a correct reveal
+  // reads the prospective count for display. Display-only: no timer or handler
+  // change.
+  const isRevealCorrect = phase === "revealing" && tint === "correct";
+  const displayScore = isRevealCorrect ? score + 1 : score;
+
+  // Display-only ladder position, read from the cumulative correct count. A new
+  // best only counts when a best already exists to beat.
+  const tier = resolveTier(
+    displayScore,
+    highScore > 0 && displayScore > highScore,
+  );
+
   // ── Timer logic ────────────────────────────────────────────────────────────
   function startTimer() {
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -156,6 +184,14 @@ export default function TimeAttackGame({
       if (phaseRef.current === "game-over") return;
       timerRef.current = Math.max(0, timerRef.current - 1);
       setDisplayTime(timerRef.current);
+      // Owner brief: urgency (visual and audible) begins at ≤ 10 s; ticks stop
+      // the moment the phase leaves `playing`.
+      emitAtmosphere({
+        type: "timer",
+        secondsLeft: timerRef.current,
+        urgent: timerRef.current <= 10,
+        fromTick: true,
+      });
       if (timerRef.current <= 0) {
         clearInterval(intervalRef.current!);
         intervalRef.current = null;
@@ -163,6 +199,7 @@ export default function TimeAttackGame({
         guessLocked.current = true;
         setPhase("game-over");
         setTint(null);
+        emitAtmosphere({ type: "phase", phase: "game-over" });
       }
     }, 1000);
   }
@@ -172,12 +209,26 @@ export default function TimeAttackGame({
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Sync phaseRef whenever phase changes
   useEffect(() => {
     phaseRef.current = phase;
+  }, [phase]);
+
+  useEffect(() => {
+    if (phase === "game-over") {
+      gameOverActionRef.current?.focus();
+    } else if (previousPhaseRef.current === "game-over" && phase === "playing") {
+      const origin = gameOverOriginRef.current;
+      const nextAction = document.querySelector<HTMLButtonElement>(
+        '[aria-label="Higher"]',
+      );
+      if (origin?.isConnected) origin.focus();
+      else nextAction?.focus();
+      gameOverOriginRef.current = null;
+    }
+    previousPhaseRef.current = phase;
   }, [phase]);
 
   // Persist the completed run's score exactly once, after the transition into
@@ -193,19 +244,26 @@ export default function TimeAttackGame({
 
   // ── Deck ref (mirrors deck state — avoids stale closure in setTimeout) ────
   const deckRef = useRef(deck);
-  const spentRef = useRef(spent);
+  const seenIdsRef = useRef(seenIds);
   useEffect(() => {
     deckRef.current = deck;
   }, [deck]);
   useEffect(() => {
-    spentRef.current = spent;
-  }, [spent]);
+    seenIdsRef.current = seenIds;
+  }, [seenIds]);
 
   // ── Guess handler ──────────────────────────────────────────────────────────
   const handleGuess = useCallback(
     (direction: "higher" | "lower") => {
       if (guessLocked.current || phaseRef.current !== "playing" || !nextItem)
         return;
+      const activeElement = document.activeElement;
+      gameOverOriginRef.current =
+        activeElement instanceof HTMLElement &&
+        activeElement !== document.body &&
+        activeElement !== document.documentElement
+          ? activeElement
+          : null;
       guessLocked.current = true;
 
       const isCorrect =
@@ -213,8 +271,37 @@ export default function TimeAttackGame({
           ? nextItem.value > currentItem.value
           : nextItem.value < currentItem.value;
 
+      const guessOrigin = originFor(
+        activeElement,
+        direction === "higher" ? '[aria-label="Higher"]' : '[aria-label="Lower"]',
+      );
+      emitAtmosphere({
+        type: "guess",
+        direction,
+        source: guessSourceRef.current === "keyboard" ? "keyboard" : "pointer",
+        x: guessOrigin.x,
+        y: guessOrigin.y,
+        w: guessOrigin.w,
+        h: guessOrigin.h,
+      });
+      const prospectiveScore = score + (isCorrect ? 1 : 0);
+      emitAtmosphere({
+        type: "reveal",
+        correct: isCorrect,
+        tier: resolveTier(
+          prospectiveScore,
+          highScore > 0 && prospectiveScore > highScore,
+        ),
+        origin: gameplayStatusOrigin(),
+      });
+      const deltaOrigin = originFor(
+        document.querySelector('[role="timer"]'),
+        '[role="timer"]',
+      );
+
       setPhase("revealing");
       setTint(isCorrect ? "correct" : "incorrect");
+      emitAtmosphere({ type: "phase", phase: "revealing" });
 
       if (isCorrect) {
         timerRef.current = Math.min(timerRef.current + BONUS_CORRECT, 999);
@@ -225,6 +312,7 @@ export default function TimeAttackGame({
           text: `+${BONUS_CORRECT}s`,
           color: "text-emerald-400",
         });
+        emitAtmosphere({ type: "delta", kind: "gain", origin: deltaOrigin });
       } else {
         timerRef.current = Math.max(0, timerRef.current - PENALTY_WRONG);
         setDisplayTime(timerRef.current);
@@ -234,6 +322,7 @@ export default function TimeAttackGame({
           text: `-${PENALTY_WRONG}s`,
           color: "text-rose-400",
         });
+        emitAtmosphere({ type: "delta", kind: "loss", origin: deltaOrigin });
         setShaking(true);
         setTimeout(() => setShaking(false), 460);
       }
@@ -246,36 +335,52 @@ export default function TimeAttackGame({
 
         // Advance deck using refs (no stale closure)
         const prevDeck = deckRef.current;
-        const prevSpent = spentRef.current;
         const consumed = prevDeck[0];
         const remaining = prevDeck.slice(1);
-        const newSpent = [...prevSpent, consumed];
+        const newSeen = new Set(seenIdsRef.current);
+        newSeen.add(consumed.id);
 
         if (remaining.length < 2) {
-          const refill = shuffle(newSpent);
-          const newDeck = dedupeAdjacentEquals([...remaining, ...refill]);
-          setDeck(newDeck);
-          setSpent([]);
-        } else {
-          setDeck(remaining);
-          setSpent(newSpent);
+          // The available pool is genuinely exhausted for this session.
+          // End the run cleanly via the existing game-over path; never
+          // recycle already-seen items to keep the timer running.
+          setSeenIds(newSeen);
+          phaseRef.current = "game-over";
+          guessLocked.current = true;
+          setPhase("game-over");
+          setTint(null);
+          emitAtmosphere({ type: "phase", phase: "game-over" });
+          return;
         }
+
+        setDeck(remaining);
+        setSeenIds(newSeen);
 
         if (phaseRef.current !== "game-over") {
           phaseRef.current = "playing";
           setPhase("playing");
+          emitAtmosphere({ type: "phase", phase: "playing" });
         }
         guessLocked.current = false;
       }, delay);
     },
-    [nextItem, currentItem],
+    [nextItem, currentItem, score, highScore],
   );
 
   // ── Keyboard ───────────────────────────────────────────────────────────────
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "ArrowUp" || e.key === "h") handleGuess("higher");
-      if (e.key === "ArrowDown" || e.key === "l") handleGuess("lower");
+      if (shouldIgnoreShortcut(e)) return;
+      if (e.key === "ArrowUp" || e.key === "h") {
+        guessSourceRef.current = "keyboard";
+        handleGuess("higher");
+        guessSourceRef.current = null;
+      }
+      if (e.key === "ArrowDown" || e.key === "l") {
+        guessSourceRef.current = "keyboard";
+        handleGuess("lower");
+        guessSourceRef.current = null;
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -287,7 +392,7 @@ export default function TimeAttackGame({
     scoreWrittenRef.current = false;
     const newDeck = shuffleDeck(initialPool);
     setDeck(newDeck);
-    setSpent([]);
+    setSeenIds(new Set());
     setScore(0);
     timerRef.current = INITIAL_TIME;
     setDisplayTime(INITIAL_TIME);
@@ -296,6 +401,7 @@ export default function TimeAttackGame({
     setDeltaLabel(null);
     phaseRef.current = "playing";
     setPhase("playing");
+    emitAtmosphere({ type: "phase", phase: "playing" });
     startTimer();
   }
 
@@ -321,10 +427,17 @@ export default function TimeAttackGame({
       title={`${categoryLabel} · Time Attack`}
       subtitle="Race the clock"
       status={
-        <div className="flex items-center gap-11">
-          <GameplayStatus value={score} label="Score" />
-          {highScore > 0 && <GameplayStatus value={highScore} label="Best" />}
-        </div>
+        <GameplayEntranceStatus>
+          <div className="flex items-center gap-11">
+            <GameplayStatus
+              value={displayScore}
+              label="Score"
+              bump={displayScore > 0}
+              tier={tier}
+            />
+            {highScore > 0 && <GameplayStatus value={highScore} label="Best" />}
+          </div>
+        </GameplayEntranceStatus>
       }
       headerFooter={
         <div className="flex items-center gap-4">
@@ -335,7 +448,7 @@ export default function TimeAttackGame({
               role="timer"
               aria-label={`${displayTime} seconds remaining`}
               aria-live={isUrgent ? "assertive" : "off"}
-              className={`text-3xl font-bold tabular-nums ${isUrgent ? "text-[var(--status-error)]" : "text-[var(--foreground-primary)]"}`}
+              className={`text-3xl font-bold tabular-nums ${isUrgent ? "timer-urgent text-[var(--status-error)]" : "text-[var(--foreground-primary)]"}`}
             >
               {pad2(displayTime)}
             </div>
@@ -343,7 +456,11 @@ export default function TimeAttackGame({
               <span
                 key={deltaLabel.key}
                 aria-hidden="true"
-                className={`float-up absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs font-bold ${deltaLabel.color}`}
+                className={`${
+                  deltaLabel.text.startsWith("-")
+                    ? "float-up-brief"
+                    : "float-up-reveal"
+                } absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs font-bold ${deltaLabel.color}`}
               >
                 {deltaLabel.text}
               </span>
@@ -366,7 +483,7 @@ export default function TimeAttackGame({
       }
     >
       <div
-        className={`relative flex min-h-0 flex-1 flex-col ${shaking ? "shake" : ""}`}
+        className={`relative flex min-h-0 flex-1 flex-col gameplay-entrance ${shaking ? "shake" : ""}`}
       >
         <GameplayDivider />
 
@@ -381,6 +498,7 @@ export default function TimeAttackGame({
         </div>
 
         <ComparisonBoard
+          phase={phase}
           current={
             <GameCard
               key={currentItem.id}
@@ -389,6 +507,7 @@ export default function TimeAttackGame({
               side="current"
               resultTint={phase === "revealing" ? tint : null}
               mode="time-attack"
+              enterHandoff={enterHandoff}
             />
           }
           next={
@@ -399,6 +518,8 @@ export default function TimeAttackGame({
               side="next"
               resultTint={phase === "revealing" ? tint : null}
               mode="time-attack"
+              enterHandoff={enterHandoff}
+              enterDelay={0.04}
             />
           }
         />
@@ -408,16 +529,33 @@ export default function TimeAttackGame({
             onHigher={() => handleGuess("higher")}
             onLower={() => handleGuess("lower")}
             disabled={phase !== "playing"}
-            className="relative z-30 px-4 pb-8 md:ml-auto md:mr-0 md:w-1/2 md:px-0 md:pr-6 lg:pr-10"
+            className="gameplay-entrance-controls relative z-30 px-4 pb-8 md:ml-auto md:mr-0 md:w-1/2 md:px-0 md:pr-6 lg:pr-10"
           />
         )}
       </div>
 
       {phase === "game-over" && (
         <div
+          ref={gameOverDialogRef}
           role="dialog"
           aria-modal="true"
           aria-labelledby="time-attack-game-over-title"
+          onKeyDown={(event) => {
+            if (event.key !== "Tab") return;
+            const actions = gameOverDialogRef.current?.querySelectorAll<HTMLElement>(
+              'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+            );
+            if (!actions?.length) return;
+            const first = actions[0];
+            const last = actions[actions.length - 1];
+            if (event.shiftKey && (document.activeElement === first || !gameOverDialogRef.current?.contains(document.activeElement))) {
+              event.preventDefault();
+              last.focus();
+            } else if (!event.shiftKey && (document.activeElement === last || !gameOverDialogRef.current?.contains(document.activeElement))) {
+              event.preventDefault();
+              first.focus();
+            }
+          }}
           className="absolute inset-0 z-50 flex items-center justify-center bg-[#15122b]/90 p-4 backdrop-blur-sm"
         >
           <div className="w-full max-w-md border-2 border-white bg-[var(--surface-raised)] p-7 text-center shadow-[8px_8px_0_var(--accent-time-attack)]">
@@ -444,6 +582,7 @@ export default function TimeAttackGame({
 
             <div className="flex flex-col gap-3">
               <button
+                ref={gameOverActionRef}
                 id="btn-play-again"
                 onClick={handlePlayAgain}
                 className="min-h-12 border-2 border-white bg-[var(--accent-highlight)] px-5 py-3 font-bold uppercase text-[#15122b] shadow-[5px_5px_0_#ffffff] transition-transform hover:-translate-y-1"

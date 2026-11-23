@@ -1,21 +1,19 @@
+import { ViewTransition } from "react";
 import { notFound, redirect } from "next/navigation";
-import { authorizeGameRoute } from "@/lib/catalog/routeAuthorization";
-import { fetchGameItems } from "@/lib/api";
+import { authorizeBackendGameRoute } from "@/lib/catalog/routeAuthorization";
 import DerivedGameState from "@/components/game/DerivedGameState";
-import ClassicGame from "@/components/game/ClassicGame";
-import TimeAttackGame from "@/components/game/TimeAttackGame";
+import SoloGameplayLoader from "@/lib/backend/SoloGameplayLoader";
 
 /**
  * /game/[mode] — route dispatcher
  *
- * Validates dynamic game entry parameters before any provider mapping, then
- * dispatches the authorized semantic category to its provider path and renders
- * the selected mode component with normalized items.
+ * Validates the dynamic route and sends the selected category to the backend
+ * session flow, retaining the approved Monthly Listeners snapshot fallback.
  */
 export default async function GameModePage(props: PageProps<"/game/[mode]">) {
   const { mode } = await props.params;
   const sp = await props.searchParams;
-  const authorization = authorizeGameRoute(mode, sp.category);
+  const authorization = authorizeBackendGameRoute(mode, sp.category);
 
   if (authorization.status === "missing-category") redirect("/");
   if (
@@ -30,34 +28,19 @@ export default async function GameModePage(props: PageProps<"/game/[mode]">) {
     return <DerivedGameState kind="unavailable" />;
   }
 
-  // Authorization succeeded: only now may the provider dispatcher run.
-  let items;
-  try {
-    items = await fetchGameItems(authorization.providerCategory);
-  } catch {
-    return <DerivedGameState kind="error" />;
-  }
-
-  if (items.length < 2) {
-    return <DerivedGameState kind="empty" />;
-  }
-
   const { mode: playableMode, category } = authorization;
-  if (playableMode === "classic") {
-    return (
-      <ClassicGame
-        initialPool={items}
+  return (
+    <ViewTransition
+      enter={{ "nav-forward": "nav-forward", default: "none" }}
+      exit={{ "nav-forward": "nav-forward", default: "none" }}
+      default="none"
+    >
+      <SoloGameplayLoader
+        mode={playableMode}
         categoryId={category.id}
         categoryLabel={category.label}
+        providerCategory={authorization.providerCategory}
       />
-    );
-  }
-
-  return (
-    <TimeAttackGame
-      initialPool={items}
-      categoryId={category.id}
-      categoryLabel={category.label}
-    />
+    </ViewTransition>
   );
 }

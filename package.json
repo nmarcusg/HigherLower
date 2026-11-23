@@ -6,9 +6,15 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "snapshot:album-release-date": "node scripts/generate-album-release-date-snapshot.mjs",
+    "snapshot:artist-album-counts": "node scripts/generate-artist-album-counts-snapshot.mjs",
+    "catalog:youtube-channels": "node scripts/generate-youtube-channel-catalog.mjs",
+    "snapshot:monthly-listeners": "node --env-file=.env.local scripts/generate-monthly-listeners-snapshot.mjs",
+    "snapshot:twitch-followers": "node --env-file=.env.local scripts/reread-twitch-metrika.mjs"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.119.2",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.4.0",
     "lucide-react": "^1.46.0",
@@ -16,7 +22,8 @@
     "next": "16.3.4",
     "radix-ui": "^1.7.0",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "socket.io-client": "^4.8.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

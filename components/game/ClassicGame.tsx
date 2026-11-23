@@ -1,14 +1,16 @@
 /**
  * ClassicGame — client-side game logic for Classic Mode.
  *
- * Deck system:
- *   - `deck` is the ordered queue of items not yet shown this round.
+ * Deck system (remaining-pool model):
+ *   - `deck` is the ordered queue of items not yet shown this cycle.
  *   - `currentItem` and `nextItem` are always the first two from the deck.
- *   - On a correct guess the deck pointer advances by 1 (currentItem consumed).
- *   - When the deck has only 1 item left (no nextItem possible), the spent
- *     items are reshuffled and appended so the game never runs out of cards.
- *   - An item NEVER appears twice in the same uninterrupted stretch because we
- *     only reshuffle the spent items, not the active pair.
+ *   - On a correct guess the deck pointer advances by 1 (currentItem consumed)
+ *     and the consumed item's ID is recorded in `seenIds`.
+ *   - An item ID cannot repeat until the whole available pool has been
+ *     consumed. When fewer than 2 items remain, a new shuffled cycle is built
+ *     from the full original pool, excluding the currently displayed item so
+ *     it cannot immediately reappear across the cycle boundary.
+ *   - Classic never ends because the pool was completed; it is endless.
  */
 
 "use client";
@@ -29,13 +31,19 @@ import GameplayShell from "@/components/game/GameplayShell";
 import ComparisonBoard from "@/components/game/ComparisonBoard";
 import GameplayDivider from "@/components/game/GameplayDivider";
 import DecisionControls from "@/components/game/DecisionControls";
-import GameplayStatus from "@/components/game/GameplayStatus";
+import GameplayStatus, {
+  type IntensityTier,
+} from "@/components/game/GameplayStatus";
 import DerivedGameState from "@/components/game/DerivedGameState";
+import { GameplayEntranceStatus } from "@/components/game/GameplayEntrance";
 import {
   readHighScore,
   subscribeHighScores,
   writeHighScore,
 } from "@/lib/highScores/storage";
+import { buildDeck, buildNextCycle, shuffleDeck } from "@/lib/game/deck";
+import { emitAtmosphere } from "@/lib/atmosphere/eventBus";
+import { gameplayStatusOrigin, originFor } from "@/lib/atmosphere/delegation";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,62 +51,41 @@ type GamePhase = "playing" | "revealing" | "game-over";
 type GuessDirection = "higher" | "lower";
 type ResultTint = "correct" | "incorrect" | null;
 
+/**
+ * Display-only reward ladder. Reads state that already exists (`score` and the
+ * stored best) and never feeds back into gameplay. Rungs:
+ *   1 = first correct · 2 = two · 3 = three or four · 4 = five or a new best.
+ * Beating an existing best counts only once the run is already meaningful
+ * (>= 3), and only when there is a best to beat — otherwise a first-ever run
+ * (best 0) would read as a milestone on every answer.
+ */
+function resolveTier(score: number, isNewBest: boolean): IntensityTier {
+  if (score >= 5 || (isNewBest && score >= 3)) return 4;
+  if (score >= 3) return 3;
+  if (score === 2) return 2;
+  if (score === 1) return 1;
+  return 0;
+}
+
+function shouldIgnoreShortcut(e: KeyboardEvent) {
+  if (document.querySelector('[role="dialog"], dialog[open], [aria-modal="true"]')) {
+    return true;
+  }
+
+  const target = e.target;
+  if (!(target instanceof Element)) return false;
+
+  return Boolean(
+    target.closest(
+      'input, textarea, select, [contenteditable], button, a[href], summary, [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="switch"], [role="tab"], [role="menuitem"], [role="combobox"]',
+    ),
+  );
+}
+
 interface ClassicGameProps {
   initialPool: GameItem[];
   categoryId: SemanticCategoryId;
   categoryLabel: string;
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/** Fisher-Yates shuffle — returns a NEW array */
-function shuffle<T>(arr: T[]): T[] {
-  const copy = [...arr];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-}
-
-/**
- * Scans a deck and ensures no two consecutive items share the same `value`.
- * When a duplicate pair is found at position [i, i+1], it looks forward for
- * the nearest item at j >= i+2 whose value differs and swaps [i+1] with [j].
- * If no swap candidate exists the pair is left as-is (tiny edge case in small
- * pools with many identical values).
- */
-function dedupeAdjacentEquals(arr: GameItem[]): GameItem[] {
-  const out = [...arr];
-  for (let i = 0; i < out.length - 1; i++) {
-    if (out[i].value === out[i + 1].value) {
-      let j = i + 2;
-      while (j < out.length && out[j].value === out[i].value) j++;
-      if (j < out.length) {
-        [out[i + 1], out[j]] = [out[j], out[i + 1]];
-      }
-    }
-  }
-  return out;
-}
-
-/**
- * Build a clean, tie-free deck from the server pool. The server already
- * shuffles the pool per request, so the initial deck preserves that order to
- * keep server and client render identical (avoids a hydration mismatch).
- * `shuffleDeck` is used for explicit re-shuffles such as "Play again".
- */
-function buildDeck(pool: GameItem[]): GameItem[] {
-  return dedupeAdjacentEquals(
-    pool.filter((item) => !!item.imageUrl && !!item.name),
-  );
-}
-
-/** Shuffle a pool into a fresh deck (used for explicit restarts). */
-function shuffleDeck(pool: GameItem[]): GameItem[] {
-  return dedupeAdjacentEquals(
-    shuffle(pool.filter((item) => !!item.imageUrl && !!item.name)),
-  );
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -109,7 +96,8 @@ export default function ClassicGame({
   categoryLabel,
 }: ClassicGameProps) {
   const [deck, setDeck] = useState<GameItem[]>(() => buildDeck(initialPool));
-  const [spent, setSpent] = useState<GameItem[]>([]);
+  // IDs consumed during the current cycle. Reset when a new cycle begins.
+  const [seenIds, setSeenIds] = useState<Set<string | number>>(() => new Set());
 
   const currentItem = deck[0];
   const nextItem = deck[1];
@@ -119,7 +107,20 @@ export default function ClassicGame({
   const [tint, setTint] = useState<ResultTint>(null);
   const [lastCorrect, setLastCorrect] = useState<boolean | null>(null);
 
+  // The handoff plays on every deck swap but never on the first paint. The
+  // opening item is captured in state once, so the flag is already correct in
+  // the same commit that swaps the cards — no effect round-trip needed.
+  const [openingItemId] = useState(() => currentItem?.id);
+  const enterHandoff = currentItem?.id !== openingItemId;
+
   const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Set only around a keyboard-initiated guess, so the emitted `source` is
+  // exact. Purely informational: it changes no gameplay state.
+  const guessSourceRef = useRef<"pointer" | "keyboard" | null>(null);
+  const gameOverActionRef = useRef<HTMLButtonElement>(null);
+  const gameOverDialogRef = useRef<HTMLDivElement>(null);
+  const gameOverOriginRef = useRef<HTMLElement | null>(null);
+  const previousPhaseRef = useRef<GamePhase>(phase);
 
   const getHighScoreSnapshot = useCallback(
     () => readHighScore({ mode: "classic", categoryId }),
@@ -131,17 +132,57 @@ export default function ClassicGame({
     () => 0,
   );
 
+  // The tally is a reveal beat (design §4.3 t1), not an advance beat. The score
+  // state itself still lands inside the untouched 1500 ms reveal timer, so a
+  // correct reveal reads the prospective score for display. Display-only: no
+  // gameplay state, timer, deck, or handler is changed.
+  const isRevealCorrect = phase === "revealing" && lastCorrect === true;
+  const displayScore = isRevealCorrect ? score + 1 : score;
+
+  // Display-only ladder position and the fixed off-ladder wrong beat. A new
+  // best only counts when a best already exists to beat.
+  const tier = resolveTier(
+    displayScore,
+    highScore > 0 && displayScore > highScore,
+  );
+  const wrongBeat = phase === "revealing" && lastCorrect === false;
+
   useEffect(() => {
     return () => {
       if (revealTimerRef.current) clearTimeout(revealTimerRef.current);
     };
   }, []);
 
+  useEffect(() => {
+    if (phase === "game-over") {
+      const focusTimer = requestAnimationFrame(() => {
+        gameOverActionRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(focusTimer);
+    } else if (previousPhaseRef.current === "game-over" && phase === "playing") {
+      const origin = gameOverOriginRef.current;
+      const nextAction = document.querySelector<HTMLButtonElement>(
+        '[aria-label="Higher"]',
+      );
+      if (origin?.isConnected) origin.focus();
+      else nextAction?.focus();
+      gameOverOriginRef.current = null;
+    }
+    previousPhaseRef.current = phase;
+  }, [phase]);
+
   // ── Guess handler ──────────────────────────────────────────────────────────
 
   const handleGuess = useCallback(
     (direction: GuessDirection) => {
       if (phase !== "playing" || !nextItem) return;
+      const activeElement = document.activeElement;
+      gameOverOriginRef.current =
+        activeElement instanceof HTMLElement &&
+        activeElement !== document.body &&
+        activeElement !== document.documentElement
+          ? activeElement
+          : null;
 
       // Strict comparison: equal values are treated as wrong for both directions.
       // dedupeAdjacentEquals() prevents equal pairs from appearing, so this is
@@ -151,12 +192,41 @@ export default function ClassicGame({
           ? nextItem.value > currentItem.value
           : nextItem.value < currentItem.value;
 
+      // Semantic emits: the guess origin is the control the player acted on,
+      // and the reveal is emitted on the beat it actually happens. Both are
+      // display-only; no gameplay state, timing or scoring value is touched.
+      const guessOrigin = originFor(
+        activeElement,
+        direction === "higher" ? '[aria-label="Higher"]' : '[aria-label="Lower"]',
+      );
+      emitAtmosphere({
+        type: "guess",
+        direction,
+        source: guessSourceRef.current === "keyboard" ? "keyboard" : "pointer",
+        x: guessOrigin.x,
+        y: guessOrigin.y,
+        w: guessOrigin.w,
+        h: guessOrigin.h,
+      });
+      const prospectiveScore = score + (isCorrect ? 1 : 0);
+      emitAtmosphere({
+        type: "reveal",
+        correct: isCorrect,
+        tier: resolveTier(
+          prospectiveScore,
+          highScore > 0 && prospectiveScore > highScore,
+        ),
+        origin: gameplayStatusOrigin(),
+      });
+
       setPhase("revealing");
       setTint(isCorrect ? "correct" : "incorrect");
       setLastCorrect(isCorrect);
+      emitAtmosphere({ type: "phase", phase: "revealing" });
 
       revealTimerRef.current = setTimeout(() => {
         setTint(null);
+        emitAtmosphere({ type: "phase", phase: isCorrect ? "playing" : "game-over" });
 
         if (isCorrect) {
           const newScore = score + 1;
@@ -164,17 +234,19 @@ export default function ClassicGame({
 
           const consumed = deck[0];
           const remaining = deck.slice(1);
-          const newSpent = [...spent, consumed];
+          const newSeen = new Set(seenIds);
+          newSeen.add(consumed.id);
 
           if (remaining.length < 2) {
-            // Reshuffle spent items and append; run dedup across the junction
-            // so the last item in `remaining` and the first refill item are never equal.
-            const refill = shuffle(newSpent);
-            setDeck(dedupeAdjacentEquals([...remaining, ...refill]));
-            setSpent([]);
+            // Cycle nearly exhausted: carry the unshown tail (0 or 1 items)
+            // into a fresh shuffled cycle so no item is skipped and the
+            // currently displayed item cannot immediately reappear at the
+            // boundary. `seenIds` resets for the new cycle.
+            setDeck(buildNextCycle(initialPool, remaining, consumed.id));
+            setSeenIds(new Set());
           } else {
             setDeck(remaining);
-            setSpent(newSpent);
+            setSeenIds(newSeen);
           }
 
           setPhase("playing");
@@ -187,15 +259,34 @@ export default function ClassicGame({
         }
       }, 1500);
     },
-    [phase, nextItem, currentItem, score, highScore, deck, spent, categoryId],
+    [
+      phase,
+      nextItem,
+      currentItem,
+      score,
+      highScore,
+      deck,
+      seenIds,
+      categoryId,
+      initialPool,
+    ],
   );
 
   // ── Keyboard support ───────────────────────────────────────────────────────
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "ArrowUp" || e.key === "h") handleGuess("higher");
-      if (e.key === "ArrowDown" || e.key === "l") handleGuess("lower");
+      if (shouldIgnoreShortcut(e)) return;
+      if (e.key === "ArrowUp" || e.key === "h") {
+        guessSourceRef.current = "keyboard";
+        handleGuess("higher");
+        guessSourceRef.current = null;
+      }
+      if (e.key === "ArrowDown" || e.key === "l") {
+        guessSourceRef.current = "keyboard";
+        handleGuess("lower");
+        guessSourceRef.current = null;
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -205,11 +296,12 @@ export default function ClassicGame({
 
   function handlePlayAgain() {
     setDeck(shuffleDeck(initialPool));
-    setSpent([]);
+    setSeenIds(new Set());
     setScore(0);
     setPhase("playing");
     setTint(null);
     setLastCorrect(null);
+    emitAtmosphere({ type: "phase", phase: "playing" });
   }
 
   // ── Guard ──────────────────────────────────────────────────────────────────
@@ -227,13 +319,20 @@ export default function ClassicGame({
       mode="classic"
       title={`${categoryLabel} · Classic`}
       status={
-        <div className="flex items-center gap-11">
-          <GameplayStatus value={score} label="Score" />
-          {highScore > 0 && <GameplayStatus value={highScore} label="Best" />}
-        </div>
+        <GameplayEntranceStatus>
+          <div className="flex items-center gap-11">
+            <GameplayStatus
+              value={displayScore}
+              label="Score"
+              bump={displayScore > 0}
+              tier={tier}
+            />
+            {highScore > 0 && <GameplayStatus value={highScore} label="Best" />}
+          </div>
+        </GameplayEntranceStatus>
       }
     >
-      <div className="relative flex min-h-0 flex-1 flex-col">
+      <div className="relative flex min-h-0 flex-1 flex-col gameplay-entrance">
         <GameplayDivider />
 
         <div
@@ -245,6 +344,8 @@ export default function ClassicGame({
         </div>
 
         <ComparisonBoard
+          phase={phase}
+          className={wrongBeat ? "shake-brief" : undefined}
           current={
             <GameCard
               key={currentItem.id}
@@ -253,6 +354,7 @@ export default function ClassicGame({
               side="current"
               resultTint={phase === "revealing" ? tint : null}
               mode="classic"
+              enterHandoff={enterHandoff}
             />
           }
           next={
@@ -263,6 +365,8 @@ export default function ClassicGame({
               side="next"
               resultTint={phase === "revealing" ? tint : null}
               mode="classic"
+              enterHandoff={enterHandoff}
+              enterDelay={0.04}
             />
           }
         />
@@ -272,7 +376,7 @@ export default function ClassicGame({
             onHigher={() => handleGuess("higher")}
             onLower={() => handleGuess("lower")}
             disabled={phase !== "playing"}
-            className="relative z-30 px-4 pb-8 md:ml-auto md:mr-0 md:w-1/2 md:px-0 md:pr-6 lg:pr-10"
+            className="gameplay-entrance-controls relative z-30 px-4 pb-8 md:ml-auto md:mr-0 md:w-1/2 md:px-0 md:pr-6 lg:pr-10"
           />
         )}
       </div>
@@ -280,9 +384,26 @@ export default function ClassicGame({
       {/* ── Game Over modal ─────────────────────────────────────────────── */}
       {phase === "game-over" && (
         <div
+          ref={gameOverDialogRef}
           role="dialog"
           aria-modal="true"
           aria-labelledby="classic-game-over-title"
+          onKeyDown={(event) => {
+            if (event.key !== "Tab") return;
+            const actions = gameOverDialogRef.current?.querySelectorAll<HTMLElement>(
+              'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+            );
+            if (!actions?.length) return;
+            const first = actions[0];
+            const last = actions[actions.length - 1];
+            if (event.shiftKey && (document.activeElement === first || !gameOverDialogRef.current?.contains(document.activeElement))) {
+              event.preventDefault();
+              last.focus();
+            } else if (!event.shiftKey && (document.activeElement === last || !gameOverDialogRef.current?.contains(document.activeElement))) {
+              event.preventDefault();
+              first.focus();
+            }
+          }}
           className="absolute inset-0 z-50 flex items-center justify-center bg-[#15122b]/90 p-4 backdrop-blur-sm"
         >
           <div className="w-full max-w-md border-2 border-white bg-[var(--surface-raised)] p-7 text-center shadow-[8px_8px_0_var(--accent-classic)]">
@@ -309,6 +430,7 @@ export default function ClassicGame({
 
             <div className="flex flex-col gap-3">
               <button
+                ref={gameOverActionRef}
                 id="btn-play-again"
                 onClick={handlePlayAgain}
                 className="min-h-12 border-2 border-white bg-[var(--accent-highlight)] px-5 py-3 font-bold uppercase text-[#15122b] shadow-[5px_5px_0_#ffffff] transition-transform hover:-translate-y-1"
