@@ -30,7 +30,7 @@ function object(value: unknown): Record<string, unknown> { return typeof value =
 function readableError(error: unknown): string { return error instanceof Error ? error.message : "The room could not be reached. Reconnecting…"; }
 function formatSeconds(milliseconds: number): string { return `${Math.max(0, Math.ceil(milliseconds / 1000))}s`; }
 
-export default function RoomExperience({ initialSessionId }: { initialSessionId: string }) {
+export default function RoomExperience({ initialSessionId, initialEntry }: { initialSessionId: string; initialEntry?: StoredRoomCredential["entry"] }) {
   const router = useRouter();
   const socketRef = useRef<Socket | null>(null);
   const [credential, setCredential] = useState<StoredRoomCredential | null>(null);
@@ -42,7 +42,7 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
   const [remainingMs, setRemainingMs] = useState(0);
   const [matchRemainingMs, setMatchRemainingMs] = useState(0);
   const [answering, setAnswering] = useState(false);
-  const [entry, setEntry] = useState<StoredRoomCredential["entry"]>();
+  const [entry, setEntry] = useState<StoredRoomCredential["entry"]>(initialEntry);
   const [copiedCode, setCopiedCode] = useState(false);
   const [lastStandings, setLastStandings] = useState<Array<Record<string, unknown>>>([]);
 
@@ -61,7 +61,7 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
   }, []);
 
   useEffect(() => {
-    const saved = readRoomCredential();
+    const saved = readRoomCredential(initialSessionId);
     if (!saved || saved.sessionId !== initialSessionId) {
       // Browser-only bootstrap; defer so the effect never writes state synchronously.
       queueMicrotask(() => {
@@ -284,7 +284,7 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
         <Link href="/multiplayer" className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-[var(--text-secondary)] hover:text-white"><ArrowLeft size={16} /> Multiplayer lobby</Link>
         <section className={`${CARD} mx-auto mt-16 w-full max-w-xl text-center`}>
           {connection === "connecting" ? <LoaderCircle className="mx-auto mb-4 animate-spin text-[var(--accent-highlight)]" /> : <WifiOff className="mx-auto mb-4 text-[var(--accent-highlight)]" />}
-          <h1 className="text-2xl font-bold text-white">{connection === "closed" ? "Room unavailable" : entry === "create" ? "Opening your room…" : entry === "join" ? "Joining room…" : entry === "spectate" ? "Joining as spectator…" : "Rejoining room…"}</h1>
+          <h1 className="text-2xl font-bold text-white">{connection === "closed" ? "Room unavailable" : entry === "create" ? "Opening your room…" : entry === "join" ? "Joining room…" : entry === "spectate" ? "Joining as spectator…" : "Connecting to the room…"}</h1>
           <p className="mt-3 text-sm text-[var(--text-secondary)]">{message || (connection === "closed" ? "This room is no longer available on this device." : "Connecting you to the room. We’ll keep trying automatically.")}</p>
           {connection === "closed" && <Link href="/multiplayer" className={`${BUTTON} mt-6`}>Return to multiplayer</Link>}
         </section>
@@ -355,7 +355,7 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
                     </div>
                     {phase === "QUESTION" && !isScoreRace && <div className="mt-5 grid grid-cols-2 gap-3"><button className={OUTLINE} type="button" disabled={submitted || answering || !connected} onClick={() => answer("LOWER")}><ArrowDown size={16} /> Lower</button><button className={BUTTON} type="button" disabled={submitted || answering || !connected} onClick={() => answer("HIGHER")}>{answering ? "Sending…" : submitted ? <><Check size={15} /> Answer locked</> : <><ArrowUp size={16} /> Higher</>}</button></div>}
                     {phase === "QUESTION" && isScoreRace && <div className="mt-5 grid grid-cols-2 gap-3"><button className={OUTLINE} type="button" disabled={submitted || answering || !connected} onClick={() => answer("LOWER")}><ArrowDown size={16} /> Lower</button><button className={BUTTON} type="button" disabled={submitted || answering || !connected} onClick={() => answer("HIGHER")}>{answering ? "Sending…" : submitted ? <><Check size={15} /> Answer locked</> : <><ArrowUp size={16} /> Higher</>}</button></div>}
-                    {revealed && <div className="mt-5 rounded-sm border border-[var(--accent-highlight)]/30 bg-[var(--accent-highlight)]/10 p-4 text-center"><p className={`text-xs font-bold uppercase tracking-[0.16em] animate-[pulse_0.45s_ease-out] ${submittedChoice ? answerIsCorrect ? "text-[var(--status-success)]" : "text-[var(--status-error)]" : "text-[var(--accent-highlight)]"}`}>{submittedChoice ? answerIsCorrect ? "Correct!" : "Wrong!" : question.correctChoice ? `Correct answer: ${question.correctChoice}` : "Answer revealed"}</p><p className="mt-1 text-sm text-white">{question.correctChoice ? `Correct answer: ${question.correctChoice} · ` : ""}{asText(right.displayValue, "The comparison has been revealed")}</p></div>}
+                    {revealed && <div className="mt-5 rounded-sm border border-[var(--accent-highlight)]/30 bg-[var(--accent-highlight)]/10 p-4 text-center"><p className={`text-xs font-bold uppercase tracking-[0.16em] ${submittedChoice ? answerIsCorrect ? "text-[var(--status-success)] animate-[fadeInScale_0.35s_ease-out]" : "text-[var(--status-error)] animate-[shake_0.4s_ease-out]" : "text-[var(--accent-highlight)] animate-[fadeInUp_0.3s_ease-out]"}`}>{submittedChoice ? answerIsCorrect ? "Correct!" : "Wrong!" : question.correctChoice ? `Correct answer: ${question.correctChoice}` : "Answer revealed"}</p><p className="mt-1 text-sm text-white">{question.correctChoice ? `Correct answer: ${question.correctChoice} · ` : ""}{asText(right.displayValue, "The comparison has been revealed")}</p></div>}
                   </>}
                   {phase === "QUESTION" && isScoreRace && !question.id && <div className="grid min-h-52 place-items-center rounded-sm border border-white/15 bg-white/[0.03] text-center"><p className="text-sm text-[var(--text-secondary)]">Your next comparison is loading…</p></div>}
                 </>
@@ -402,7 +402,7 @@ function Leaderboard({ snapshot, entries, isSpectator, results, matchRemainingMs
   return <aside className={CARD} aria-label="Leaderboard"><div className="mb-5 flex items-center justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-time-attack)]">{isSpectator ? "Tournament view" : "Standings"}</p><h2 className="mt-1 text-xl font-bold">Leaderboard</h2></div><Trophy size={19} className="text-[var(--accent-highlight)]" /></div><ol className="space-y-2">{entries.map((entry, index) => {
     const actorId = asText(entry.actorId);
     const stats = statsByActor.get(actorId) ?? entry;
-    return <li key={actorId || index} className="rounded-sm border border-white/10 bg-white/[0.025] px-3 py-3"><div className="flex items-center gap-3"><span className={`grid size-8 shrink-0 place-items-center rounded-sm text-xs font-black ${index === 0 ? "bg-[var(--accent-highlight)] text-[#201b3b]" : "bg-white/10 text-white"}`}>{asNumber(entry.rank, index + 1)}</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold text-white">{asText(entry.nickname, "Player")}</p><p className="text-[10px] text-[var(--text-muted)]">{stats.eliminated === true ? "Eliminated" : stats.connected === false ? "Disconnected" : "In match"}</p></div><strong className="text-sm tabular-nums text-[var(--accent-highlight)]">{asNumber(entry.score)}</strong></div><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 pl-11 text-[10px] text-[var(--text-muted)]">{mode.includes("HP") && <span>HP {asNumber(entry.hp, asNumber(stats.finalHp, 0))}</span>}{mode.includes("STREAK") && <span>Streak {asNumber(entry.streak, asNumber(stats.maxStreak, 0))}</span>}{snapshot.roundNumber !== undefined && <span>Round {asNumber(snapshot.roundNumber)}{snapshot.totalRounds ? `/${snapshot.totalRounds}` : ""}</span>}{snapshot.matchEndsAt && <span>Time {formatSeconds(matchRemainingMs)}</span>}</div></li>;
+    return <li key={actorId || index} className={`rounded-sm border border-white/10 bg-white/[0.025] px-3 py-3 ${stats.eliminated === true || stats.connected === false || entry.connected === false ? "opacity-45 grayscale" : ""}`}><div className="flex items-center gap-3"><span className={`grid size-8 shrink-0 place-items-center rounded-sm text-xs font-black ${index === 0 ? "bg-[var(--accent-highlight)] text-[#201b3b]" : "bg-white/10 text-white"}`}>{asNumber(entry.rank, index + 1)}</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold text-white">{asText(entry.nickname, "Player")}</p><p className="text-[10px] text-[var(--text-muted)]">{stats.eliminated === true ? "Eliminated" : stats.connected === false ? "Disconnected" : "In match"}</p></div><strong className="text-sm tabular-nums text-[var(--accent-highlight)]">{asNumber(entry.score)}</strong></div><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 pl-11 text-[10px] text-[var(--text-muted)]">{mode.includes("HP") && <span>HP {asNumber(entry.hp, asNumber(stats.finalHp, 0))}</span>}{mode.includes("STREAK") && <span>Streak {asNumber(entry.streak, asNumber(stats.maxStreak, 0))}</span>}{snapshot.roundNumber !== undefined && <span>Round {asNumber(snapshot.roundNumber)}{snapshot.totalRounds ? `/${snapshot.totalRounds}` : ""}</span>}{snapshot.matchEndsAt && <span>Time {formatSeconds(matchRemainingMs)}</span>}</div></li>;
   })}</ol>{entries.length === 0 && <div className="rounded-sm border border-dashed border-white/15 p-5 text-center text-xs text-[var(--text-muted)]"><Users className="mx-auto mb-2" size={17} />Scores will appear once play begins.</div>}<p className="mt-4 border-t border-white/10 pt-3 text-[10px] leading-4 text-[var(--text-muted)]">{isSpectator ? "Read-only score and mode stats. No questions or answers are sent to spectators." : "Scores update after each shared reveal or as players progress through Score Race."}</p></aside>;
 }
 

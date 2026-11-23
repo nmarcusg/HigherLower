@@ -53,13 +53,12 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function readRoomCredential(): StoredRoomCredential | null {
+function sessionStorageKey(sessionId: string): string {
+  return `${STORAGE_KEY}:${sessionId}`;
+}
+
+function parseStoredCredential(raw: string): StoredRoomCredential | null {
   try {
-    // Prefer tab-local identity: two people testing or playing from separate
-    // tabs must not overwrite one another's room token. Keep localStorage as a
-    // recovery fallback for an accidentally closed tab.
-    const raw = window.sessionStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (!isObject(parsed) || typeof parsed.sessionId !== "string" || typeof parsed.gameToken !== "string") return null;
     return {
@@ -77,9 +76,34 @@ export function readRoomCredential(): StoredRoomCredential | null {
   }
 }
 
+/**
+ * Look up a stored room credential. Passing `sessionId` reads that room's own
+ * slot first, so an unrelated recent room can never make this room look absent.
+ */
+export function readRoomCredential(sessionId?: string): StoredRoomCredential | null {
+  try {
+    // Prefer tab-local identity: two people testing or playing from separate
+    // tabs must not overwrite one another's room token. Keep localStorage as a
+    // recovery fallback for an accidentally closed tab.
+    const keys = sessionId ? [sessionStorageKey(sessionId), STORAGE_KEY] : [STORAGE_KEY];
+    for (const key of keys) {
+      const raw = window.sessionStorage.getItem(key) ?? window.localStorage.getItem(key);
+      if (!raw) continue;
+      const credential = parseStoredCredential(raw);
+      if (credential && (!sessionId || credential.sessionId === sessionId)) return credential;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function storeRoomCredential(credential: StoredRoomCredential): void {
-  window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(credential));
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(credential));
+  const json = JSON.stringify(credential);
+  for (const storage of [window.sessionStorage, window.localStorage]) {
+    storage.setItem(STORAGE_KEY, json);
+    storage.setItem(sessionStorageKey(credential.sessionId), json);
+  }
 }
 
 export function clearRoomCredential(sessionId: string): void {
@@ -88,6 +112,8 @@ export function clearRoomCredential(sessionId: string): void {
     window.sessionStorage.removeItem(STORAGE_KEY);
     window.localStorage.removeItem(STORAGE_KEY);
   }
+  window.sessionStorage.removeItem(sessionStorageKey(sessionId));
+  window.localStorage.removeItem(sessionStorageKey(sessionId));
 }
 
 async function roomRequest<T>(

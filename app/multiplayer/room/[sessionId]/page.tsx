@@ -6,7 +6,9 @@ export const metadata: Metadata = {
   description: "Play or spectate a Higher or Lower multiplayer room.",
 };
 
-export default async function MultiplayerRoomPage({ params }: { params: Promise<{ sessionId: string }> }) {
+export default async function MultiplayerRoomPage({ params, searchParams }: { params: Promise<{ sessionId: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const { sessionId } = await params;
-  return <RoomExperience initialSessionId={sessionId} />;
+  const { entry } = await searchParams;
+  const initialEntry = entry === "create" || entry === "join" || entry === "spectate" ? entry : undefined;
+  return <RoomExperience initialSessionId={sessionId} initialEntry={initialEntry} />;
 }

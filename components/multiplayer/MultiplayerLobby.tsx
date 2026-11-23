@@ -132,7 +132,7 @@ export default function MultiplayerLobby() {
         state: credential.state as Record<string, unknown>,
       });
       setStatus(`Room ${credential.roomCode} is ready. Opening the room…`);
-      router.push(`/multiplayer/room/${encodeURIComponent(credential.sessionId)}`);
+      router.push(`/multiplayer/room/${encodeURIComponent(credential.sessionId)}?entry=create`);
     } catch (error) {
       reportError(error);
     } finally {
@@ -156,7 +156,7 @@ export default function MultiplayerLobby() {
         state: credential.state as Record<string, unknown>,
       });
       setStatus(`Joined room ${credential.roomCode}. Opening the room…`);
-      router.push(`/multiplayer/room/${encodeURIComponent(credential.sessionId)}`);
+      router.push(`/multiplayer/room/${encodeURIComponent(credential.sessionId)}?entry=${joinAsSpectator ? "spectate" : "join"}`);
     } catch (error) {
       reportError(error);
     } finally {
@@ -306,7 +306,7 @@ export default function MultiplayerLobby() {
             <div className="mt-3 flex items-center justify-between rounded-sm border border-dashed border-white/15 px-3 py-2.5 text-xs text-[var(--text-muted)]">
               <span className="inline-flex items-center gap-2"><Users size={14} /> {room ? `Room ${room.roomCode}` : "Room size set by mode"}</span>
               <button disabled={!room} type="button" onClick={copyInvite} className="inline-flex items-center gap-1.5 font-bold text-[var(--text-secondary)] hover:text-white disabled:cursor-not-allowed disabled:opacity-40" aria-label="Copy room code">
-                {copied ? <Check size={13} /> : <Copy size={13} />} {copied ? "Copied" : "Invite"}
+                {copied ? <Check size={13} /> : <Copy size={13} />} {copied ? "Copied" : "Copy code"}
               </button>
             </div>
           </section>

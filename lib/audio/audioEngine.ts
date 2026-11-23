@@ -38,6 +38,7 @@ interface EngineState {
   noise: AudioBuffer | null;
   voices: number;
   lastPlayed: Map<CueName, number>;
+  pending: Array<{ name: CueName; at: number }>;
   started: boolean;
 }
 
@@ -48,6 +49,7 @@ const state: EngineState = {
   noise: null,
   voices: 0,
   lastPlayed: new Map(),
+  pending: [],
   started: false,
 };
 
@@ -157,6 +159,7 @@ export function unlockAudio(): void {
       .then(() => {
         setAudioState("running");
         applySettings();
+        flushPendingCues();
       })
       .catch(() => {
         setAudioState("armed");
@@ -177,6 +180,16 @@ export function applySettings(settings: AudioSettings = getAudioSettingsSnapshot
 
   master.gain.setTargetAtTime(muted ? 0 : MASTER_LEVEL, now, 0.06);
   sfxBus.gain.setTargetAtTime(settings.muted || !settings.sfx ? 0 : SFX_LEVEL, now, 0.06);
+}
+
+function flushPendingCues() {
+  if (state.pending.length === 0) return;
+  const nowMs = performance.now();
+  const queued = state.pending.splice(0, state.pending.length);
+  for (const cue of queued) {
+    if (nowMs - cue.at > 1500) continue;
+    playCue(cue.name);
+  }
 }
 
 // ─── Voices ──────────────────────────────────────────────────────────────────
@@ -267,7 +280,13 @@ export function playCue(name: CueName): void {
   // Gate on the real context, not the lifecycle label: a context constructed
   // inside a gesture is already `running` in Chromium, so the *first* qualifying
   // gesture plays its own cue instead of losing it to ordering.
-  if (!ctx || ctx.state !== "running") return;
+  if (!ctx || ctx.state !== "running") {
+    // Keep the newest cues so they survive the gap before the first gesture (or
+    // while suspended) instead of being lost until the user reloads.
+    state.pending.push({ name, at: performance.now() });
+    if (state.pending.length > 6) state.pending.shift();
+    return;
+  }
   const settings = getAudioSettingsSnapshot();
   if (isAudioMuted(settings) || !settings.sfx) return;
   if (name === "hover-tick" && !resolveTicks(settings)) return;
@@ -379,6 +398,7 @@ function onVisibilityChange() {
       .then(() => {
         setAudioState("running");
         applySettings();
+        flushPendingCues();
       })
       .catch(() => setAudioState("armed"));
   }
@@ -393,12 +413,28 @@ export function startAudioEngine(): () => void {
   const unsubscribeSettings = subscribeAudioSettings(() => applySettings());
   document.addEventListener("visibilitychange", onVisibilityChange);
 
+  // Any first gesture anywhere unlocks the context, even when the visible audio
+  // control has never been touched.
+  const gestureOptions: AddEventListenerOptions = { passive: true, capture: true };
+  const onFirstGesture = () => {
+    unlockAudio();
+    window.removeEventListener("pointerdown", onFirstGesture, gestureOptions);
+    window.removeEventListener("keydown", onFirstGesture, gestureOptions);
+    window.removeEventListener("touchstart", onFirstGesture, gestureOptions);
+  };
+  window.addEventListener("pointerdown", onFirstGesture, gestureOptions);
+  window.addEventListener("keydown", onFirstGesture, gestureOptions);
+  window.addEventListener("touchstart", onFirstGesture, gestureOptions);
+
   if (audioState !== "off" && !isAudioSupported()) setAudioState("off");
 
   return () => {
     unsubscribeBus();
     unsubscribeSettings();
     document.removeEventListener("visibilitychange", onVisibilityChange);
+    window.removeEventListener("pointerdown", onFirstGesture, gestureOptions);
+    window.removeEventListener("keydown", onFirstGesture, gestureOptions);
+    window.removeEventListener("touchstart", onFirstGesture, gestureOptions);
     state.started = false;
   };
 }
