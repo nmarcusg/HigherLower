@@ -67,6 +67,12 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "coverartarchive.org",
       },
+      // Supabase Storage — losslessly compressed catalog imagery
+      {
+        protocol: "https",
+        hostname: "**.supabase.co",
+        pathname: "/storage/v1/object/public/**",
+      },
     ],
 
     // Allow SVG images (e.g. flag SVGs from flagcdn / wikimedia)

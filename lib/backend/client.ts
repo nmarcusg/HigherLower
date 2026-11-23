@@ -238,7 +238,14 @@ async function request<T>(path: string, init: RequestInit, parse: (body: unknown
   return parse(body);
 }
 
+const CLIENT_CATALOG_CACHE_TTL_MS = 60_000;
+let cachedCategories: { value: CategoryPage; expiresAt: number } | null = null;
+const cachedPlaysetPages = new Map<string, { value: PublicPlaysetPage; expiresAt: number }>();
+
 export function fetchCategories(options?: { signal?: AbortSignal }): Promise<CategoryPage> {
+  if (typeof window !== "undefined" && cachedCategories && cachedCategories.expiresAt > Date.now()) {
+    return Promise.resolve(cachedCategories.value);
+  }
   const timeoutSignal = AbortSignal.timeout(CATEGORIES_REQUEST_TIMEOUT_MS);
   const signal = options?.signal
     ? AbortSignal.any([options.signal, timeoutSignal])
@@ -247,7 +254,12 @@ export function fetchCategories(options?: { signal?: AbortSignal }): Promise<Cat
   // CORS allowlist may not yet include this Vercel project's generated domain.
   // Server-rendered pages call the API directly and retain their local fallback.
   const path = typeof window === "undefined" ? "/categories" : "/api/backend/categories";
-  return request(path, { method: "GET", cache: "no-store", signal }, parseCategoryPage);
+  return request(path, { method: "GET", cache: "no-store", signal }, parseCategoryPage).then((page) => {
+    if (typeof window !== "undefined") {
+      cachedCategories = { value: page, expiresAt: Date.now() + CLIENT_CATALOG_CACHE_TTL_MS };
+    }
+    return page;
+  });
 }
 
 function soloPath(sessionId?: string, suffix = ""): string {
@@ -318,8 +330,17 @@ export function fetchPublicPlaysets(options: { limit?: number; offset?: number; 
   if (options.limit !== undefined) params.set("limit", String(options.limit));
   if (options.offset !== undefined) params.set("offset", String(options.offset));
   const query = params.size ? `?${params.toString()}` : "";
+  if (typeof window !== "undefined") {
+    const cached = cachedPlaysetPages.get(query);
+    if (cached && cached.expiresAt > Date.now()) return Promise.resolve(cached.value);
+  }
   const base = typeof window === "undefined" ? "/playsets" : "/api/backend/playsets";
-  return request(`${base}${query}`, { method: "GET", cache: "no-store", signal: options.signal }, parsePublicPlaysetPage);
+  return request(`${base}${query}`, { method: "GET", cache: "no-store", signal: options.signal }, parsePublicPlaysetPage).then((page) => {
+    if (typeof window !== "undefined") {
+      cachedPlaysetPages.set(query, { value: page, expiresAt: Date.now() + CLIENT_CATALOG_CACHE_TTL_MS });
+    }
+    return page;
+  });
 }
 
 export function fetchPublicPlayset(id: string, options: { signal?: AbortSignal } = {}): Promise<PublicPlaysetDetail> {

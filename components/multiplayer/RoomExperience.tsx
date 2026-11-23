@@ -33,36 +33,182 @@ function object(value: unknown): Record<string, unknown> { return typeof value =
 function readableError(error: unknown): string { return error instanceof Error ? error.message : "The room could not be reached. Reconnecting…"; }
 function formatSeconds(milliseconds: number): string { return `${Math.max(0, Math.ceil(milliseconds / 1000))}s`; }
 
+const LIVE_ENGINE_PHASES = new Set(["COUNTDOWN", "QUESTION", "REVEAL", "FINISHED"]);
+const OPTIMIZABLE_IMAGE_HOSTS = new Set([
+  "image.tmdb.org",
+  "flagcdn.com",
+  "upload.wikimedia.org",
+  "commons.wikimedia.org",
+  "cdn.akamai.steamstatic.com",
+  "shared.akamai.steamstatic.com",
+  "cdn.cloudflare.steamstatic.com",
+  "shared.fastly.steamstatic.com",
+  "images.igdb.com",
+  "yt3.ggpht.com",
+  "static-cdn.jtvnw.net",
+  "archive.org",
+  "coverartarchive.org",
+]);
+
+function isOptimizableImageUrl(src: string): boolean {
+  try {
+    const parsed = new URL(src);
+    if (parsed.protocol !== "https:") return false;
+    return OPTIMIZABLE_IMAGE_HOSTS.has(parsed.hostname) || parsed.hostname.endsWith(".supabase.co");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Merge an incoming room snapshot without allowing an HTTP RoomStateView
+ * (which has `phase: "RUNNING"` and no `question`) to clobber a live Socket.IO
+ * engine snapshot, or allowing an out-of-order stateVersion to regress gameplay.
+ */
+function mergeRoomSnapshot(
+  current: MultiplayerSnapshot | null,
+  incoming: MultiplayerSnapshot,
+): MultiplayerSnapshot {
+  if (!current || current.sessionId !== incoming.sessionId) return incoming;
+
+  const preservedRoomCode = incoming.roomCode || current.roomCode;
+  const preservedSettings = incoming.settings ?? current.settings;
+
+  // Terminal states always win, preserving room metadata for post-match actions.
+  if (incoming.status === "CANCELLED" || incoming.status === "FINISHED") {
+    return {
+      ...incoming,
+      roomCode: preservedRoomCode,
+      settings: preservedSettings,
+      hostActorId: incoming.hostActorId || current.hostActorId,
+      you: incoming.you ? { ...current.you, ...incoming.you } : current.you,
+    };
+  }
+
+  // HTTP lifecycle reads during an active match carry `phase: "RUNNING"` and no
+  // `stateVersion` or `question`. Merge only authoritative room/host/forfeit
+  // metadata so the host's live countdown or question cards never flash away.
+  const currentHasLiveEngine =
+    current.status === "RUNNING" &&
+    typeof current.phase === "string" &&
+    LIVE_ENGINE_PHASES.has(current.phase);
+  const incomingIsHttpStub =
+    incoming.status === "RUNNING" &&
+    (!incoming.phase || incoming.phase === "RUNNING") &&
+    !incoming.question &&
+    incoming.stateVersion === undefined;
+
+  if (currentHasLiveEngine && incomingIsHttpStub) {
+    const nextHostActorId = incoming.hostActorId || current.hostActorId;
+    const incomingYou = object(incoming.you);
+    return {
+      ...current,
+      roomCode: preservedRoomCode,
+      settings: preservedSettings,
+      hostActorId: nextHostActorId,
+      you: current.you
+        ? {
+            ...current.you,
+            ...(typeof incomingYou.isHost === "boolean" ? { isHost: incomingYou.isHost } : {}),
+            ...(typeof incomingYou.eliminated === "boolean" ? { eliminated: incomingYou.eliminated } : {}),
+            ...(typeof incomingYou.forfeited === "boolean" ? { forfeited: incomingYou.forfeited } : {}),
+            ...(incomingYou.forfeitReason !== undefined ? { forfeitReason: incomingYou.forfeitReason as string | null } : {}),
+          }
+        : incoming.you,
+    };
+  }
+
+  // Never regress live engine state to an older stateVersion.
+  if (
+    current.status === incoming.status &&
+    typeof current.stateVersion === "number" &&
+    typeof incoming.stateVersion === "number" &&
+    current.stateVersion > 0 &&
+    incoming.stateVersion > 0 &&
+    incoming.stateVersion < current.stateVersion
+  ) {
+    return current;
+  }
+
+  return {
+    ...incoming,
+    roomCode: preservedRoomCode,
+    settings: preservedSettings,
+    hostActorId: incoming.hostActorId || current.hostActorId,
+  };
+}
+
+function computeTimers(snap: MultiplayerSnapshot | null, clockOffsetMs: number): [number, number] {
+  if (!snap) return [0, 0];
+  const adjustedNow = Date.now() + clockOffsetMs;
+  const question = object(snap.question);
+  const target = snap.phase === "COUNTDOWN"
+    ? asNumber(snap.phaseEndsAt, asNumber(snap.startsAt))
+    : asNumber(question.closesAt, asNumber(snap.roundClosesAt, asNumber(snap.phaseEndsAt, asNumber(snap.matchEndsAt))));
+  const remaining = target ? target - adjustedNow : 0;
+  const matchEnd = asNumber(snap.matchEndsAt);
+  const matchRemaining = matchEnd ? matchEnd - adjustedNow : 0;
+  return [remaining, matchRemaining];
+}
+
 export default function RoomExperience({ initialSessionId, initialEntry }: { initialSessionId: string; initialEntry?: StoredRoomCredential["entry"] }) {
   const router = useRouter();
   const socketRef = useRef<Socket | null>(null);
+  const clockOffsetRef = useRef(0);
+  const myActorIdRef = useRef("");
+  const wasHostRef = useRef<boolean | null>(null);
   const [credential, setCredential] = useState<StoredRoomCredential | null>(null);
   const [snapshot, setSnapshot] = useState<MultiplayerSnapshot | null>(null);
   const [results, setResults] = useState<Record<string, unknown> | null>(null);
   const [connection, setConnection] = useState<"connecting" | "connected" | "reconnecting" | "closed">("connecting");
   const [message, setMessage] = useState("");
+  const [hostNotice, setHostNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [startingMatch, setStartingMatch] = useState(false);
   const [remainingMs, setRemainingMs] = useState(0);
   const [matchRemainingMs, setMatchRemainingMs] = useState(0);
   const [answering, setAnswering] = useState(false);
   const [entry, setEntry] = useState<StoredRoomCredential["entry"]>(initialEntry);
   const [copiedCode, setCopiedCode] = useState(false);
   const [lastStandings, setLastStandings] = useState<Array<Record<string, unknown>>>([]);
-  const [confirmHostLeaveMatch, setConfirmHostLeaveMatch] = useState(false);
+  const [confirmLeaveMatch, setConfirmLeaveMatch] = useState(false);
+  const [confirmHostLeaveRoom, setConfirmHostLeaveRoom] = useState(false);
 
-  const refreshRoom = useCallback(async (activeCredential: StoredRoomCredential) => {
+  const applySnapshot = useCallback((incoming: MultiplayerSnapshot) => {
+    if (typeof incoming.serverNow === "number" && Number.isFinite(incoming.serverNow)) {
+      clockOffsetRef.current = incoming.serverNow - Date.now();
+    }
+    const incomingYou = object(incoming.you);
+    if (typeof incomingYou.actorId === "string" && incomingYou.actorId) {
+      myActorIdRef.current = incomingYou.actorId;
+    }
+    setSnapshot((current) => {
+      const merged = mergeRoomSnapshot(current, incoming);
+      const [nextRemaining, nextMatchRemaining] = computeTimers(merged, clockOffsetRef.current);
+      queueMicrotask(() => {
+        setRemainingMs(nextRemaining);
+        setMatchRemainingMs(nextMatchRemaining);
+        if (merged.status !== "LOBBY" && merged.phase && LIVE_ENGINE_PHASES.has(merged.phase)) {
+          setStartingMatch(false);
+        }
+      });
+      return merged;
+    });
+  }, []);
+
+  const refreshRoom = useCallback(async (activeCredential: StoredRoomCredential, options?: { keepMessage?: boolean }) => {
     try {
       const state = await getRoomState(activeCredential);
       if (state.sessionId !== activeCredential.sessionId) return;
-      setSnapshot(state);
-      setMessage("");
+      applySnapshot(state);
+      if (!options?.keepMessage) setMessage("");
       if (state.status === "FINISHED") {
         void getRoomResults(activeCredential).then(setResults).catch(() => undefined);
       }
     } catch (error) {
       setMessage(readableError(error));
     }
-  }, []);
+  }, [applySnapshot]);
 
   useEffect(() => {
     const saved = readRoomCredential(initialSessionId);
@@ -78,9 +224,13 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
     queueMicrotask(() => {
       setCredential(saved);
       setEntry(saved.entry);
-      if (saved.state?.sessionId === saved.sessionId) setSnapshot(saved.state);
+      if (saved.state?.sessionId === saved.sessionId) applySnapshot(saved.state);
     });
-    queueMicrotask(() => { void refreshRoom(saved); });
+    // Skip redundant initial HTTP fetch when we already have the room state
+    // from create/join — Socket.IO `room:attached` delivers fresh state immediately.
+    if (!saved.state || saved.state.sessionId !== saved.sessionId) {
+      queueMicrotask(() => { void refreshRoom(saved); });
+    }
 
     const socket = connectRoom(saved);
     socketRef.current = socket;
@@ -88,7 +238,7 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
       setConnection("connected");
       setMessage("");
       socket.timeout(5000).emit("room:resync", {}, (error: Error | null, response: Ack & { state?: MultiplayerSnapshot }) => {
-        if (!error && response?.ok && response.state) setSnapshot(response.state);
+        if (!error && response?.ok && response.state) applySnapshot(response.state);
       });
     });
     socket.on("disconnect", () => setConnection("reconnecting"));
@@ -97,20 +247,20 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
       setMessage(error.message === "UNAUTHORIZED" ? "Room access expired. Rejoin from the lobby." : "Connection interrupted. Reconnecting…");
     });
     socket.on("room:attached", (event: { state?: MultiplayerSnapshot }) => {
-      if (event?.state) setSnapshot(event.state);
+      if (event?.state) applySnapshot(event.state);
     });
     socket.on("room:state", (state: MultiplayerSnapshot) => {
-      if (state?.sessionId) setSnapshot(state);
+      if (state?.sessionId) applySnapshot(state);
     });
-    socket.on("round:opened", (state: MultiplayerSnapshot) => setSnapshot(state));
-    socket.on("question:advanced", (state: MultiplayerSnapshot) => setSnapshot(state));
+    socket.on("round:opened", (state: MultiplayerSnapshot) => applySnapshot(state));
+    socket.on("question:advanced", (state: MultiplayerSnapshot) => applySnapshot(state));
     socket.on("standings:updated", (event: { sessionId?: string; standings?: Array<Record<string, unknown>> }) => {
       if (event.sessionId === saved.sessionId && Array.isArray(event.standings)) {
         setSnapshot((current) => current ? { ...current, standings: event.standings } : current);
       }
     });
     socket.on("round:reveal", (state: MultiplayerSnapshot) => {
-      setSnapshot(state);
+      applySnapshot(state);
       const you = object(state.you);
       const question = object(state.question);
       const correct = typeof you.choice === "string" && you.choice === question.correctChoice;
@@ -121,39 +271,70 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
       setAnswering(false);
       setMessage(error?.message || "The room rejected that action.");
     });
-    socket.on("room:player:forfeited", (event: { actorId?: string; reason?: string; hostActorId?: string }) => {
-      if (event?.reason !== "MATCH_LEFT") return;
+    socket.on("room:host:transferred", (event: { hostActorId?: string; hostNickname?: string | null }) => {
+      const nextHostActorId = event?.hostActorId;
+      if (!nextHostActorId) return;
       setSnapshot((current) => {
         if (!current) return current;
-        const nextHostActorId = event.hostActorId || current.hostActorId;
         const currentYou = object(current.you);
-        const becameHost =
-          Boolean(nextHostActorId) &&
-          currentYou.actorId === nextHostActorId &&
-          currentYou.isHost !== true;
-        if (becameHost) {
-          setMessage("The previous host left the match. You are now the host.");
+        const actorId = asText(currentYou.actorId, myActorIdRef.current);
+        const isNowHost = currentYou.role !== "SPECTATOR" && Boolean(actorId) && actorId === nextHostActorId;
+        if (isNowHost) {
+          setHostNotice("You are now the host of this room. You can manage the room and start the rematch when the match ends.");
+        } else if (event.hostNickname) {
+          setMessage(`${event.hostNickname} is now the host of this room.`);
         }
         return {
           ...current,
-          ...(nextHostActorId ? { hostActorId: nextHostActorId } : {}),
-          ...(current.you && nextHostActorId
-            ? { you: { ...current.you, isHost: current.you.role !== "SPECTATOR" && current.you.actorId === nextHostActorId } }
+          hostActorId: nextHostActorId,
+          ...(current.you
+            ? { you: { ...current.you, isHost: isNowHost } }
+            : {}),
+          ...(Array.isArray(current.players)
+            ? {
+                players: current.players.map((player) => ({
+                  ...player,
+                  isHost: player.role !== "SPECTATOR" && player.actorId === nextHostActorId,
+                })),
+              }
             : {}),
         };
       });
     });
     socket.on("room:ended", (event: { state?: MultiplayerSnapshot; status?: string }) => {
-      if (event?.state) setSnapshot(event.state);
+      if (event?.state) applySnapshot(event.state);
       if (event?.status === "FINISHED") void getRoomResults(saved).then(setResults).catch(() => undefined);
     });
-    socket.on("room:postmatch", () => void refreshRoom(saved));
+    socket.on("room:postmatch", (event?: { hostActorId?: string; nextSessionId?: string | null }) => {
+      if (event?.hostActorId) {
+        const nextHostActorId = event.hostActorId;
+        setSnapshot((current) => {
+          if (!current) return current;
+          const currentYou = object(current.you);
+          const actorId = asText(currentYou.actorId, myActorIdRef.current);
+          const isNowHost = currentYou.role !== "SPECTATOR" && Boolean(actorId) && actorId === nextHostActorId;
+          if (isNowHost && currentYou.isHost !== true) {
+            setHostNotice("You are now the host of this room. Start a rematch whenever you’re ready.");
+          }
+          return {
+            ...current,
+            hostActorId: nextHostActorId,
+            ...(current.you ? { you: { ...current.you, isHost: isNowHost } } : {}),
+            ...(event.nextSessionId
+              ? { settings: { ...object(current.settings), nextSessionId: event.nextSessionId } }
+              : {}),
+          };
+        });
+      }
+      void refreshRoom(saved, { keepMessage: true });
+    });
     socket.on("room:rematch", (event: { nextSessionId?: string }) => {
       if (event.nextSessionId) {
         const nextCredential = { ...saved, sessionId: event.nextSessionId, state: undefined };
         storeRoomCredential(nextCredential);
         setCredential(nextCredential);
         setResults(null);
+        setHostNotice("");
         router.replace(`/multiplayer/room/${encodeURIComponent(event.nextSessionId)}`);
       }
     });
@@ -167,7 +348,7 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [initialSessionId, refreshRoom, router]);
+  }, [applySnapshot, initialSessionId, refreshRoom, router]);
 
   // Shared-round state intentionally withholds standings until reveal. Keep the
   // last disclosed standings visible during the next question instead of
@@ -177,25 +358,21 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
     if (Array.isArray(standings)) queueMicrotask(() => setLastStandings(standings));
   }, [snapshot?.standings]);
 
-  // Lobby joins are HTTP lifecycle operations, so an already-attached host does
-  // not receive a socket event when somebody joins. A short, bounded poll keeps
-  // the waiting room truthful without adding a second lobby socket protocol.
+  // Fallback lobby poll only when Socket.IO is disconnected; when connected,
+  // `notifyLobbyChanged` pushes joins, leaves, and settings in real time.
   useEffect(() => {
-    if (!credential || snapshot?.status !== "LOBBY") return;
-    const interval = window.setInterval(() => void refreshRoom(credential), 2_000);
+    if (!credential || snapshot?.status !== "LOBBY" || connection === "connected") return;
+    const interval = window.setInterval(() => void refreshRoom(credential, { keepMessage: true }), 6_000);
     return () => window.clearInterval(interval);
-  }, [credential, refreshRoom, snapshot?.status]);
+  }, [connection, credential, refreshRoom, snapshot?.status]);
 
   useEffect(() => {
+    if (!snapshot) return;
     const ticker = window.setInterval(() => {
-      if (!snapshot) return;
-      const question = object(snapshot.question);
-      const target = snapshot.phase === "COUNTDOWN"
-        ? asNumber(snapshot.phaseEndsAt, asNumber(snapshot.startsAt))
-        : asNumber(question.closesAt, asNumber(snapshot.roundClosesAt, asNumber(snapshot.phaseEndsAt, asNumber(snapshot.matchEndsAt))));
-      setRemainingMs(target ? target - Date.now() : 0);
-      setMatchRemainingMs(asNumber(snapshot.matchEndsAt) ? asNumber(snapshot.matchEndsAt) - Date.now() : 0);
-    }, 250);
+      const [nextRemaining, nextMatchRemaining] = computeTimers(snapshot, clockOffsetRef.current);
+      setRemainingMs(nextRemaining);
+      setMatchRemainingMs(nextMatchRemaining);
+    }, 150);
     return () => window.clearInterval(ticker);
   }, [snapshot]);
 
@@ -210,6 +387,19 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
       (you.role === "PLAYER" && (you.forfeited === true || snapshot?.readOnly === true)));
   const isSpectator = isTrueSpectator || leftMatch || snapshot?.readOnly === true;
   const isHost = !isTrueSpectator && (you.isHost === true || (Boolean(snapshot?.hostActorId) && you.actorId === snapshot?.hostActorId));
+
+  // Notify the player if host privilege was transferred to them (even via HTTP refresh/resync).
+  useEffect(() => {
+    if (!snapshot) return;
+    if (wasHostRef.current === false && isHost) {
+      queueMicrotask(() => {
+        setHostNotice((current) =>
+          current || "You are now the host of this room. You can manage the room and start the rematch when the match ends.",
+        );
+      });
+    }
+    wasHostRef.current = isHost;
+  }, [isHost, snapshot]);
   const playerCount = Array.isArray(snapshot?.players) ? snapshot.players.filter((player) => player.role !== "SPECTATOR").length : 0;
   const leaderboard = useMemo(() => {
     const standings = Array.isArray(snapshot?.standings) ? snapshot.standings : [];
@@ -261,17 +451,24 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
   async function startRoom() {
     if (!credential) return;
     setBusy(true);
+    setStartingMatch(true);
     try {
-      setSnapshot(await roomAction(credential, "start"));
+      const started = await roomAction<MultiplayerSnapshot>(credential, "start");
+      applySnapshot(started);
       setMessage("");
-    } catch (error) { setMessage(readableError(error)); }
-    finally { setBusy(false); }
+    } catch (error) {
+      setStartingMatch(false);
+      setMessage(readableError(error));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function exitRoom() {
     if (!credential) { router.replace("/multiplayer"); return; }
     setBusy(true);
-    setConfirmHostLeaveMatch(false);
+    setConfirmLeaveMatch(false);
+    setConfirmHostLeaveRoom(false);
     try {
       await roomAction(credential, "leave");
     } catch (error) {
@@ -288,21 +485,32 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
     router.replace("/multiplayer");
   }
 
+  function requestExitRoom() {
+    const needsHostConfirm =
+      isHost &&
+      !isTrueSpectator &&
+      (status === "RUNNING" || (status === "LOBBY" && playerCount > 1));
+    if (needsHostConfirm) {
+      setConfirmHostLeaveRoom(true);
+      return;
+    }
+    void exitRoom();
+  }
+
   async function leaveCurrentMatch() {
     if (!credential) return;
     setBusy(true);
-    setConfirmHostLeaveMatch(false);
+    setConfirmLeaveMatch(false);
     try {
       const result = await roomAction<{
         sessionId: string;
         status: "LEFT_MATCH";
-        wasHost?: boolean;
-        hostTransferredTo?: string | null;
+        isHost?: boolean;
       }>(credential, "leave-match");
-      await refreshRoom(credential);
+      await refreshRoom(credential, { keepMessage: true });
       setMessage(
-        result.wasHost && result.hostTransferredTo
-          ? "You left the match. Host privilege transferred to another player while the match continues."
+        result.isHost
+          ? "You forfeited the current match. You kept your host privileges and can start the rematch once this match finishes."
           : "You forfeited the current match. Waiting in this room for the next match.",
       );
     } catch (error) {
@@ -322,8 +530,9 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
       // otherwise shadow the new session and strand this tab on "unavailable".
       storeRoomCredential(nextCredential);
       setCredential(nextCredential);
-      setSnapshot(next);
+      applySnapshot(next);
       setResults(null);
+      setHostNotice("");
       router.replace(`/multiplayer/room/${encodeURIComponent(next.sessionId)}`);
     } catch (error) { setMessage(readableError(error)); }
     finally { setBusy(false); }
@@ -333,7 +542,7 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
     if (!credential) return;
     setBusy(true);
     try {
-      await refreshRoom(credential);
+      await refreshRoom(credential, { keepMessage: true });
       setMessage("You’re in the room. Waiting for the host to start a rematch…");
     } finally {
       setBusy(false);
@@ -351,7 +560,7 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
       if (timeoutError) {
         setMessage("Answer confirmation is taking a moment. Reconnecting to check your answer…");
         socket.emit("room:resync", {}, (_error: Error | null, response: Ack & { state?: MultiplayerSnapshot }) => {
-          if (response?.state) setSnapshot(response.state);
+          if (response?.state) applySnapshot(response.state);
         });
       } else if (ack?.ok) {
         setSnapshot((current) => current ? { ...current, you: { ...object(current.you), submitted: true } } : current);
@@ -388,10 +597,22 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
   const connected = connection === "connected";
   const cancelled = status === "CANCELLED";
   const finished = status === "FINISHED" || phase === "FINISHED";
+  const countdownSeconds = Math.ceil(remainingMs / 1000);
+  const showMatchLoadingSpinner =
+    !leftMatch &&
+    !isTrueSpectator &&
+    (startingMatch ||
+      (status === "RUNNING" &&
+        (phase === "RUNNING" ||
+          (phase === "COUNTDOWN" && countdownSeconds <= 0) ||
+          (phase === "QUESTION" && !question.id))));
+  const showActiveCountdown =
+    !leftMatch && !isTrueSpectator && status === "RUNNING" && phase === "COUNTDOWN" && countdownSeconds > 0;
+
   return (
     <main className="relative z-10 mx-auto flex min-h-dvh w-full max-w-6xl flex-col px-5 py-6 sm:px-8 sm:py-10">
       <header className="flex flex-wrap items-center justify-between gap-4">
-        {!finished && <Link href="/multiplayer" onClick={(event) => { event.preventDefault(); void exitRoom(); }} className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-[var(--text-secondary)] transition hover:text-white"><ArrowLeft size={16} /> Leave room</Link>}
+        {!finished && <Link href="/multiplayer" onClick={(event) => { event.preventDefault(); requestExitRoom(); }} className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-[var(--text-secondary)] transition hover:text-white"><ArrowLeft size={16} /> Leave room</Link>}
         <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">
           {connected ? <Wifi size={12} className="text-[var(--accent-highlight)]" /> : <WifiOff size={12} className="text-amber-300" />}
           {connected ? "Connected" : "Reconnecting"}
@@ -401,7 +622,7 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
       <section className="mx-auto w-full max-w-5xl flex-1 py-9 sm:py-12">
         <div className="mb-8 flex flex-wrap items-end justify-between gap-5">
           <div>
-            <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--accent-action-higher)]">{leftMatch ? "Waiting in room" : isTrueSpectator ? "Spectator view" : isHost ? "You are hosting" : "You're in"}</p>
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--accent-action-higher)]">{leftMatch ? (isHost ? "Waiting in room · Host" : "Waiting in room") : isTrueSpectator ? "Spectator view" : isHost ? "You are hosting" : "You're in"}</p>
             <h1 className="text-4xl font-bold leading-none tracking-[-0.07em] text-white [text-shadow:4px_4px_0_var(--accent-time-attack)] sm:text-6xl">ROOM <span className="text-[var(--accent-highlight)]">{asText(snapshot.roomCode, credential.roomCode)}</span></h1>
             <p className="mt-3 text-sm text-[var(--text-secondary)]">{mode.replaceAll("PVP_", "").replaceAll("_", " ")} · {status.toLowerCase()}</p>
           </div>
@@ -409,7 +630,7 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
             <button
               className={OUTLINE}
               type="button"
-              onClick={() => (isHost ? setConfirmHostLeaveMatch(true) : void leaveCurrentMatch())}
+              onClick={() => setConfirmLeaveMatch(true)}
               disabled={busy}
             >
               <LogOut size={14} /> Leave match
@@ -417,7 +638,7 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
           )}
         </div>
 
-        {confirmHostLeaveMatch && isHost && status === "RUNNING" && (
+        {confirmLeaveMatch && status === "RUNNING" && !isTrueSpectator && !leftMatch && (
           <div
             role="dialog"
             aria-modal="true"
@@ -425,20 +646,60 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
             className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-xs"
           >
             <section className={`${CARD} w-full max-w-md border-amber-300/40 bg-[#1b1734]`}>
-              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-highlight)]">Host confirmation</p>
-              <h2 id="leave-match-dialog-title" className="mt-2 text-2xl font-bold text-white">Leave match and transfer host?</h2>
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-highlight)]">Forfeit confirmation</p>
+              <h2 id="leave-match-dialog-title" className="mt-2 text-2xl font-bold text-white">Forfeit and leave this match?</h2>
               <p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">
-                Leaving this match will forfeit your current run and remove your host privilege, transferring host ownership to another active player. The match will continue to run while you wait in this room for the next match.
+                Leaving this match will forfeit your current run while the match continues. You will stay in room <strong className="tracking-[0.12em] text-white">{asText(snapshot.roomCode, credential.roomCode)}</strong> and wait for the next match.
+                {isHost ? " You will keep your host privileges for the next match." : ""}
               </p>
               <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <button className={OUTLINE} type="button" disabled={busy} onClick={() => setConfirmHostLeaveMatch(false)}>
+                <button className={OUTLINE} type="button" disabled={busy} onClick={() => setConfirmLeaveMatch(false)}>
                   Stay in match
                 </button>
                 <button className={BUTTON} type="button" disabled={busy} onClick={() => void leaveCurrentMatch()}>
-                  {busy ? "Leaving…" : "Leave match"}
+                  {busy ? "Leaving…" : "Forfeit match"}
                 </button>
               </div>
             </section>
+          </div>
+        )}
+
+        {confirmHostLeaveRoom && isHost && !isTrueSpectator && !finished && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="leave-room-dialog-title"
+            className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-xs"
+          >
+            <section className={`${CARD} w-full max-w-md border-amber-300/40 bg-[#1b1734]`}>
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-highlight)]">Host confirmation</p>
+              <h2 id="leave-room-dialog-title" className="mt-2 text-2xl font-bold text-white">Leave room and transfer host?</h2>
+              <p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">
+                {status === "RUNNING"
+                  ? "Leaving this room will remove your host privilege and transfer it to another active player. The current match will continue to run without you."
+                  : "Leaving this room will remove your host privilege and transfer it to another player in the lobby."}
+              </p>
+              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button className={OUTLINE} type="button" disabled={busy} onClick={() => setConfirmHostLeaveRoom(false)}>
+                  Stay in room
+                </button>
+                <button className={BUTTON} type="button" disabled={busy} onClick={() => void exitRoom()}>
+                  {busy ? "Leaving…" : "Leave room"}
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
+
+        {hostNotice && (
+          <div role="status" className="mb-5 flex items-center justify-between gap-3 rounded-sm border border-[var(--accent-highlight)]/50 bg-[var(--accent-highlight)]/15 px-4 py-3 text-xs text-white">
+            <span className="inline-flex items-center gap-2 font-semibold">
+              <Crown size={15} className="shrink-0 text-[var(--accent-highlight)]" aria-hidden="true" />
+              {hostNotice}
+            </span>
+            <button type="button" onClick={() => setHostNotice("")} className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent-highlight)] hover:underline">
+              Dismiss
+            </button>
           </div>
         )}
 
@@ -455,7 +716,7 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
               <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4"><p className="text-xs leading-5 text-[var(--text-muted)]">Share room code <strong className="tracking-[0.2em] text-white">{snapshot.roomCode || credential.roomCode}</strong> with players joining this match.</p><button type="button" className={OUTLINE} onClick={() => void copyRoomCode()}><Copy size={14} />{copiedCode ? "Copied" : "Copy code"}</button></div>
             </section>
             <section className={`${CARD} flex flex-col justify-between`}>
-              <div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-time-attack)]">Match settings</p><h2 className="mt-1 text-2xl font-bold">{modeLabel(mode)}</h2><SettingsSummary snapshot={snapshot} />{isHost && <RoomSettingsEditor snapshot={snapshot} credential={credential} onSaved={(next) => { setSnapshot(next); setMessage("Room settings updated."); }} />}</div>
+              <div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-time-attack)]">Match settings</p><h2 className="mt-1 text-2xl font-bold">{modeLabel(mode)}</h2><SettingsSummary snapshot={snapshot} />{isHost && <RoomSettingsEditor snapshot={snapshot} credential={credential} onSaved={(next) => { applySnapshot(next); setMessage("Room settings updated."); }} />}</div>
               <div className="mt-8">
                 {isHost ? <button className={`${BUTTON} w-full`} type="button" disabled={busy || playerCount < 2} onClick={() => void startRoom()}>{busy ? "Starting…" : playerCount < 2 ? "Waiting for another player" : "Start match"}</button> : <p className="rounded-sm border border-white/15 bg-white/[0.03] px-4 py-3 text-center text-xs text-[var(--text-secondary)]">Waiting for the host to start the match…</p>}
                 {isHost && playerCount < 2 && <p className="mt-3 text-center text-[10px] text-[var(--text-muted)]">At least two players are needed to start.</p>}
@@ -467,13 +728,16 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
         {(status === "RUNNING" || status === "FINALIZING") && (
           <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
             <section className={CARD}>
-              <div className="mb-6 flex flex-wrap items-center justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-action-higher)]">{isSpectator ? "Live leaderboard" : isScoreRace ? "Race clock" : `Round ${currentRound}${totalRounds ? ` of ${totalRounds}` : ""}`}</p><h2 className="mt-1 text-2xl font-bold">{phaseLabel(phase)}</h2>{!isSpectator && !isScoreRace && (phase === "QUESTION" || phase === "REVEAL") && <p className="mt-1 text-xs text-[var(--text-secondary)]">{asNumber(snapshot.answeredCount)} of {asNumber(snapshot.totalAnswerers, playerCount)} players answered</p>}</div><div className="flex items-center gap-3">{mode.includes("HP") && !isSpectator && <div className="min-w-32"><div className="mb-1 flex justify-between text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]"><span>Health</span><span>{hp}/100</span></div><div className="h-2 overflow-hidden rounded-full border border-white/20 bg-white/10"><div className="h-full bg-[var(--status-success)] transition-[width] duration-300" style={{ width: `${hp}%` }} /></div></div>}<div className="rounded-sm border border-white/20 bg-white/[0.04] px-4 py-2 text-lg font-bold tabular-nums text-[var(--accent-highlight)]">{formatSeconds(remainingMs)}</div></div></div>
+              <div className="mb-6 flex flex-wrap items-center justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-action-higher)]">{isSpectator ? "Live leaderboard" : isScoreRace ? "Race clock" : currentRound > 0 ? `Round ${currentRound}${totalRounds ? ` of ${totalRounds}` : ""}` : "Starting match"}</p><h2 className="mt-1 text-2xl font-bold">{showMatchLoadingSpinner ? "Loading match" : phaseLabel(phase)}</h2>{!isSpectator && !isScoreRace && (phase === "QUESTION" || phase === "REVEAL") && <p className="mt-1 text-xs text-[var(--text-secondary)]">{asNumber(snapshot.answeredCount)} of {asNumber(snapshot.totalAnswerers, playerCount)} players answered</p>}</div><div className="flex items-center gap-3">{mode.includes("HP") && !isSpectator && <div className="min-w-32"><div className="mb-1 flex justify-between text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]"><span>Health</span><span>{hp}/100</span></div><div className="h-2 overflow-hidden rounded-full border border-white/20 bg-white/10"><div className="h-full bg-[var(--status-success)] transition-[width] duration-300" style={{ width: `${hp}%` }} /></div></div>}<div className="grid min-w-16 place-items-center rounded-sm border border-white/20 bg-white/[0.04] px-4 py-2 text-lg font-bold tabular-nums text-[var(--accent-highlight)]">{showMatchLoadingSpinner ? <LoaderCircle size={18} className="animate-spin" aria-label="Loading" /> : formatSeconds(remainingMs)}</div></div></div>
               {leftMatch ? (
                 <div className="rounded-sm border border-dashed border-white/20 bg-white/[0.02] p-6 text-center">
                   <Users className="mx-auto mb-3 text-[var(--accent-highlight)]" size={24} />
                   <h3 className="text-lg font-bold text-white">Waiting for the next match</h3>
                   <p className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">
-                    You forfeited the current match and are waiting in room <strong className="tracking-[0.16em] text-white">{asText(snapshot.roomCode, credential.roomCode)}</strong>. Stay here to join the host’s next match automatically, or use <strong className="text-white">Leave room</strong> above to exit.
+                    You forfeited the current match and are waiting in room <strong className="tracking-[0.16em] text-white">{asText(snapshot.roomCode, credential.roomCode)}</strong>.
+                    {isHost
+                      ? " You are still the host — once this match ends, you can start a rematch for everyone."
+                      : " Stay here to join the host’s next match automatically, or use Leave room above to exit."}
                   </p>
                 </div>
               ) : isSpectator ? (
@@ -494,7 +758,25 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
                 )
               ) : (
                 <>
-                  {phase === "COUNTDOWN" && <div className="grid min-h-52 place-items-center rounded-sm border border-white/15 bg-white/[0.03] text-center"><div><p className="text-7xl font-black tabular-nums text-white">{formatSeconds(remainingMs)}</p><p className="mt-2 text-xs uppercase tracking-[0.15em] text-[var(--text-muted)]">Get ready</p></div></div>}
+                  {showMatchLoadingSpinner && (
+                    <div className="grid min-h-52 place-items-center rounded-sm border border-white/15 bg-white/[0.03] text-center">
+                      <div>
+                        <LoaderCircle className="mx-auto mb-3 animate-spin text-[var(--accent-highlight)]" size={34} />
+                        <p className="text-xs font-bold uppercase tracking-[0.16em] text-white">
+                          {phase === "COUNTDOWN" ? "Opening round…" : "Preparing match…"}
+                        </p>
+                        <p className="mt-1.5 text-[11px] text-[var(--text-muted)]">Syncing gameplay with the room</p>
+                      </div>
+                    </div>
+                  )}
+                  {showActiveCountdown && (
+                    <div className="grid min-h-52 place-items-center rounded-sm border border-white/15 bg-white/[0.03] text-center">
+                      <div>
+                        <p className="text-7xl font-black tabular-nums text-white">{countdownSeconds}</p>
+                        <p className="mt-2 text-xs uppercase tracking-[0.15em] text-[var(--text-muted)]">Get ready</p>
+                      </div>
+                    </div>
+                  )}
                   {(phase === "QUESTION" || phase === "REVEAL" || phase === "FINISHED") && question.id && <>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <QuestionCard item={left} label="Current" revealed />
@@ -504,7 +786,6 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
                     {phase === "QUESTION" && isScoreRace && <div className="mt-5 grid grid-cols-2 gap-3"><button className={OUTLINE} type="button" disabled={submitted || answering || !connected} onClick={() => answer("LOWER")}><ArrowDown size={16} /> Lower</button><button className={BUTTON} type="button" disabled={submitted || answering || !connected} onClick={() => answer("HIGHER")}>{answering ? "Sending…" : submitted ? <><Check size={15} /> Answer locked</> : <><ArrowUp size={16} /> Higher</>}</button></div>}
                     {revealed && <div className="mt-5 rounded-sm border border-[var(--accent-highlight)]/30 bg-[var(--accent-highlight)]/10 p-4 text-center"><p className={`text-xs font-bold uppercase tracking-[0.16em] ${submittedChoice ? answerIsCorrect ? "text-[var(--status-success)] animate-[fadeInScale_0.35s_ease-out]" : "text-[var(--status-error)] animate-[shake_0.4s_ease-out]" : "text-[var(--accent-highlight)] animate-[fadeInUp_0.3s_ease-out]"}`}>{submittedChoice ? answerIsCorrect ? "Correct!" : "Wrong!" : question.correctChoice ? `Correct answer: ${question.correctChoice}` : "Answer revealed"}</p><p className="mt-1 text-sm text-white">{question.correctChoice ? `Correct answer: ${question.correctChoice} · ` : ""}{asText(right.displayValue, "The comparison has been revealed")}</p></div>}
                   </>}
-                  {phase === "QUESTION" && isScoreRace && !question.id && <div className="grid min-h-52 place-items-center rounded-sm border border-white/15 bg-white/[0.03] text-center"><p className="text-sm text-[var(--text-secondary)]">Your next comparison is loading…</p></div>}
                 </>
               )}
               {!isSpectator && <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 border-t border-white/10 pt-4 text-xs text-[var(--text-secondary)]"><span>Score <strong className="text-white">{score}</strong></span>{mode.includes("STREAK") && <span>Streak <strong className="text-white">{asNumber(you.streak)}</strong></span>}{mode.includes("HP") && <span>Health <strong className="text-white">{asNumber(you.hp)}/100</strong></span>}</div>}
@@ -513,7 +794,7 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
           </div>
         )}
 
-        {finished && <div className="grid gap-5 md:grid-cols-[0.8fr_1fr]"><section className={`${CARD} text-center`}><Trophy className="mx-auto mb-4 text-[var(--accent-highlight)]" size={30} /><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-action-higher)]">Match complete</p><h2 className="mt-2 text-3xl font-bold">{isSpectator ? "Final leaderboard" : "Your final score"}</h2>{!isSpectator && <p className="mt-3 text-5xl font-black text-[var(--accent-highlight)]">{finalScore}</p>}<p className="mt-3 text-xs leading-5 text-[var(--text-muted)]">{isHost && !isSpectator ? "Start a rematch to open the next room, or leave for multiplayer." : "Stay in this room to follow the host’s rematch, or leave for multiplayer."}</p><div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">{isHost && !isSpectator ? <button className={BUTTON} disabled={busy} onClick={() => void rematch()}><RotateCcw size={14} /> Rematch</button> : <button className={OUTLINE} disabled={busy} onClick={() => void waitForHostRematch()}>{busy ? "Checking room…" : "Wait for host rematch"}</button>}<button className={OUTLINE} disabled={busy} onClick={() => void exitRoom()}><LogOut size={14} /> Leave to multiplayer</button></div></section><Leaderboard snapshot={snapshot} entries={leaderboard} isSpectator={isSpectator} results={results} matchRemainingMs={matchRemainingMs} /></div>}
+        {finished && <div className="grid gap-5 md:grid-cols-[0.8fr_1fr]"><section className={`${CARD} text-center`}><Trophy className="mx-auto mb-4 text-[var(--accent-highlight)]" size={30} /><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-action-higher)]">Match complete</p><h2 className="mt-2 text-3xl font-bold">{isTrueSpectator ? "Final leaderboard" : "Your final score"}</h2>{!isTrueSpectator && <p className="mt-3 text-5xl font-black text-[var(--accent-highlight)]">{finalScore}</p>}<p className="mt-3 text-xs leading-5 text-[var(--text-muted)]">{isHost && !isTrueSpectator ? "You are the host. Start a rematch to open the next room, or leave for multiplayer." : "Stay in this room to follow the host’s rematch, or leave for multiplayer."}</p><div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">{isHost && !isTrueSpectator ? <button className={BUTTON} disabled={busy} onClick={() => void rematch()}><RotateCcw size={14} /> Rematch</button> : <button className={OUTLINE} disabled={busy} onClick={() => void waitForHostRematch()}>{busy ? "Checking room…" : "Wait for host rematch"}</button>}<button className={OUTLINE} disabled={busy} onClick={() => void exitRoom()}><LogOut size={14} /> Leave to multiplayer</button></div></section><Leaderboard snapshot={snapshot} entries={leaderboard} isSpectator={isTrueSpectator} results={results} matchRemainingMs={matchRemainingMs} /></div>}
         {cancelled && <section className={`${CARD} mx-auto max-w-xl text-center`}><h2 className="text-2xl font-bold">Room ended</h2><p className="mt-3 text-sm text-[var(--text-secondary)]">The host ended this room. You can return to multiplayer or join another room.</p><Link className={`${BUTTON} mt-6`} href="/multiplayer">Return to multiplayer</Link></section>}
 
         {status === "LOBBY" && isSpectator && <div className="grid gap-5 md:grid-cols-[1fr_300px]"><section className={CARD}><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-action-higher)]">Spectator seat</p><h2 className="mt-1 text-2xl font-bold">Waiting for the match</h2><p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">The leaderboard will appear when the host starts. You’ll only see player scores and mode stats.</p></section><Leaderboard snapshot={snapshot} entries={leaderboard} isSpectator results={results} matchRemainingMs={matchRemainingMs} /></div>}
@@ -630,7 +911,8 @@ function SettingsSummary({ snapshot }: { snapshot: MultiplayerSnapshot }) {
 function QuestionCard({ item, label, revealed }: { item: Record<string, unknown>; label: string; revealed: boolean }) {
   const imageUrl = typeof item.imageUrl === "string" ? item.imageUrl : null;
   const attribution = typeof item.attribution === "string" ? item.attribution : null;
-  return <div className="relative flex min-h-52 flex-col justify-end overflow-hidden rounded-sm border border-white/15 bg-[#15122b] p-4 sm:min-h-64">{imageUrl && <Image src={imageUrl} alt="" fill unoptimized className="object-cover opacity-25" sizes="(max-width: 640px) 100vw, 50vw" />}
+  const optimizable = imageUrl ? isOptimizableImageUrl(imageUrl) : false;
+  return <div className="relative flex min-h-52 flex-col justify-end overflow-hidden rounded-sm border border-white/15 bg-[#15122b] p-4 sm:min-h-64">{imageUrl && <Image src={imageUrl} alt="" fill priority unoptimized={!optimizable} className="object-cover opacity-25" sizes="(max-width: 640px) 100vw, 480px" />}
     <div className="relative z-10"><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-action-higher)]">{label}</p><h3 className="mt-2 text-xl font-bold text-white sm:text-2xl">{asText(item.name, "Loading comparison…")}</h3>{revealed && <p className="mt-3 text-2xl font-black text-[var(--accent-highlight)]">{asText(item.displayValue, "")}</p>}{attribution && <p className="mt-2 text-[10px] leading-snug text-white/75">Image: {attribution}</p>}</div>
   </div>;
 }
