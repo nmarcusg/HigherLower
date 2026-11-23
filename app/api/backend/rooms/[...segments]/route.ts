@@ -2,7 +2,7 @@ const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL?.trim().replace(/\/+$/, "") ||
   "https://higherorlower-api.onrender.com/api/v1";
 const ROOM_ID_PATTERN = /^[A-Za-z0-9-]{1,64}$/;
-const ALLOWED_ACTIONS = new Set(["start", "leave", "results", "rematch", "kick", "end", "settings"]);
+const ALLOWED_ACTIONS = new Set(["start", "leave", "leave-match", "results", "rematch", "kick", "end", "settings"]);
 
 type RouteContext = { params: Promise<{ segments: string[] }> };
 

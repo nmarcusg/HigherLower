@@ -16,7 +16,16 @@ export interface MultiplayerSnapshot {
   mode?: string;
   rulesVersion?: string;
   hostActorId?: string;
-  you?: { actorId?: string; nickname?: string; isHost?: boolean; role?: "PLAYER" | "SPECTATOR"; submitted?: boolean } | null;
+  you?: {
+    actorId?: string;
+    nickname?: string;
+    isHost?: boolean;
+    role?: "PLAYER" | "SPECTATOR";
+    submitted?: boolean;
+    eliminated?: boolean;
+    forfeited?: boolean;
+    forfeitReason?: string | null;
+  } | null;
   players?: Array<{
     actorId?: string;
     nickname?: string;
@@ -24,6 +33,9 @@ export interface MultiplayerSnapshot {
     isHost?: boolean;
     connected?: boolean;
     answered?: boolean;
+    eliminated?: boolean;
+    forfeited?: boolean;
+    forfeitReason?: string | null;
     score?: number;
     [key: string]: unknown;
   }>;
@@ -165,7 +177,7 @@ export function getRoomResults(credential: RoomCredential): Promise<Record<strin
   return roomRequest(credential, "/results", "GET");
 }
 
-export function roomAction<T = MultiplayerSnapshot>(credential: RoomCredential, action: "start" | "leave" | "rematch" | "end"): Promise<T> {
+export function roomAction<T = MultiplayerSnapshot>(credential: RoomCredential, action: "start" | "leave" | "leave-match" | "rematch" | "end"): Promise<T> {
   return roomRequest(credential, `/${action}`, "POST");
 }
 
