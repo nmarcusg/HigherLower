@@ -179,6 +179,8 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
   const revealed = phase === "REVEAL" || phase === "FINISHED";
   const isScoreRace = mode === "PVP_SCORE_RACE";
   const score = asNumber(you.score);
+  const submittedChoice = asText(you.choice);
+  const answerIsCorrect = Boolean(submittedChoice && question.correctChoice && submittedChoice === question.correctChoice);
   const savedPlayer = Array.isArray(results?.players)
     ? results.players.find((player) => object(player).actorId === you.actorId)
     : undefined;
@@ -325,7 +327,7 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
                     </div>
                     {phase === "QUESTION" && !isScoreRace && <div className="mt-5 grid grid-cols-2 gap-3"><button className={OUTLINE} type="button" disabled={submitted || answering || !connected} onClick={() => answer("LOWER")}><ArrowDown size={16} /> Lower</button><button className={BUTTON} type="button" disabled={submitted || answering || !connected} onClick={() => answer("HIGHER")}>{answering ? "Sending…" : submitted ? <><Check size={15} /> Answer locked</> : <><ArrowUp size={16} /> Higher</>}</button></div>}
                     {phase === "QUESTION" && isScoreRace && <div className="mt-5 grid grid-cols-2 gap-3"><button className={OUTLINE} type="button" disabled={submitted || answering || !connected} onClick={() => answer("LOWER")}><ArrowDown size={16} /> Lower</button><button className={BUTTON} type="button" disabled={submitted || answering || !connected} onClick={() => answer("HIGHER")}>{answering ? "Sending…" : submitted ? <><Check size={15} /> Answer locked</> : <><ArrowUp size={16} /> Higher</>}</button></div>}
-                    {revealed && <div className="mt-5 rounded-sm border border-[var(--accent-highlight)]/30 bg-[var(--accent-highlight)]/10 p-4 text-center"><p className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--accent-highlight)]">{question.correctChoice ? `Correct answer: ${question.correctChoice}` : "Answer revealed"}</p><p className="mt-1 text-sm text-white">{asText(right.displayValue, "The comparison has been revealed")}</p></div>}
+                    {revealed && <div className="mt-5 rounded-sm border border-[var(--accent-highlight)]/30 bg-[var(--accent-highlight)]/10 p-4 text-center"><p className={`text-xs font-bold uppercase tracking-[0.16em] animate-[pulse_0.45s_ease-out] ${submittedChoice ? answerIsCorrect ? "text-[var(--status-success)]" : "text-[var(--status-error)]" : "text-[var(--accent-highlight)]"}`}>{submittedChoice ? answerIsCorrect ? "Correct!" : "Wrong!" : question.correctChoice ? `Correct answer: ${question.correctChoice}` : "Answer revealed"}</p><p className="mt-1 text-sm text-white">{question.correctChoice ? `Correct answer: ${question.correctChoice} · ` : ""}{asText(right.displayValue, "The comparison has been revealed")}</p></div>}
                   </>}
                   {phase === "QUESTION" && isScoreRace && !question.id && <div className="grid min-h-52 place-items-center rounded-sm border border-white/15 bg-white/[0.03] text-center"><p className="text-sm text-[var(--text-secondary)]">Your next comparison is loading…</p></div>}
                 </>
