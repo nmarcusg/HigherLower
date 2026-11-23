@@ -13,10 +13,13 @@ import type { GameItem } from "@/types/api";
 import {
   answerSoloQuestion,
   createSoloSession,
+  endSoloSession,
   getSoloResults,
   getSoloSession,
 } from "@/lib/backend/client";
 import { BackendApiError } from "@/lib/backend/types";
+import { emitAtmosphere } from "@/lib/atmosphere/eventBus";
+import { gameplayStatusOrigin, originFor } from "@/lib/atmosphere/delegation";
 import type {
   SoloAnswerReceipt,
   SoloChoice,
@@ -86,6 +89,7 @@ export default function BackendSoloGame({ playsetId, categoryLabel, mode }: Back
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
   const [now, setNow] = useState(0);
   const [enterHandoff, setEnterHandoff] = useState(false);
+  const [confirmAbort, setConfirmAbort] = useState(false);
   const restoreStarted = useRef(false);
   const answerLocked = useRef(false);
   const expiryRefreshPending = useRef(false);
@@ -200,6 +204,8 @@ export default function BackendSoloGame({ playsetId, categoryLabel, mode }: Back
     setServerOffsetMs(receipt.serverNow - Date.now());
     setAnswerCorrect(receipt.correct);
     setPhase("revealing");
+    emitAtmosphere({ type: "phase", phase: "revealing" });
+    emitAtmosphere({ type: "reveal", correct: receipt.correct, tier: receipt.correct ? 3 : 0, origin: gameplayStatusOrigin() });
 
     const remainingRevealMs = Math.max(0, (receipt.revealEndsAt ?? receipt.serverNow) - (Date.now() + (receipt.serverNow - Date.now())));
     await new Promise((resolve) => setTimeout(resolve, remainingRevealMs + 80));
@@ -229,6 +235,7 @@ export default function BackendSoloGame({ playsetId, categoryLabel, mode }: Back
     setError(null);
     const id = requestId();
     const input = { sessionId: credential.sessionId, gameToken: credential.gameToken, questionId: state.questionId, choice, requestId: id };
+    emitAtmosphere({ type: "guess", direction: choice === "HIGHER" ? "higher" : "lower", source: "keyboard", ...originFor(document.activeElement, ".gameplay-entrance-controls") });
     try {
       let receipt: SoloAnswerReceipt;
       try {
@@ -359,6 +366,13 @@ export default function BackendSoloGame({ playsetId, categoryLabel, mode }: Back
   }, [busy, phase, submitAnswer]);
 
   const backHref = "/";
+  const abortGame = useCallback(async () => {
+    if (credential && state?.status === "RUNNING") {
+      try { await endSoloSession(credential.sessionId, credential.gameToken); } catch { /* local exit remains available */ }
+    }
+    sessionStorage.removeItem(storageKey);
+    window.location.assign(backHref);
+  }, [credential, state?.status, storageKey]);
   if (phase === "loading") {
     return (
       <GameplayShell mode={mode} title={`${categoryLabel} · ${modeTitle}`}>
@@ -406,6 +420,7 @@ export default function BackendSoloGame({ playsetId, categoryLabel, mode }: Back
           </div>
         </div>
       ) : undefined}
+      onBack={!isTerminal ? () => setConfirmAbort(true) : undefined}
     >
       <div className="relative flex min-h-0 flex-1 flex-col gameplay-entrance">
         <GameplayDivider />
@@ -439,6 +454,15 @@ export default function BackendSoloGame({ playsetId, categoryLabel, mode }: Back
               <button onClick={() => { sessionStorage.removeItem(storageKey); setResults(null); setState(null); setCredential(null); restoreStarted.current = false; setPhase("loading"); void createFreshSession(); }} className="min-h-12 border-2 border-white bg-[var(--accent-highlight)] px-5 py-3 font-bold uppercase text-[#15122b] shadow-[5px_5px_0_#ffffff] transition-transform hover:-translate-y-1">Play again</button>
               <Link href="/" className="flex min-h-12 items-center justify-center gap-2 border-2 border-white px-5 py-3 text-sm font-bold uppercase text-white transition-colors hover:bg-white/10"><ArrowLeft size={14} />Back to setup</Link>
             </div>
+          </div>
+        </div>
+      )}
+      {confirmAbort && (
+        <div role="dialog" aria-modal="true" aria-labelledby="abort-game-title" className="absolute inset-0 z-[60] flex items-center justify-center bg-[#15122b]/90 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md border-2 border-white bg-[var(--surface-raised)] p-7 text-center shadow-[8px_8px_0_var(--gameplay-accent)]">
+            <h2 id="abort-game-title" className="text-2xl font-bold uppercase">Abort this game?</h2>
+            <p className="mt-3 text-sm text-[var(--foreground-muted)]">Your current run will end and cannot be resumed.</p>
+            <div className="mt-6 flex gap-3"><button className="min-h-11 flex-1 border-2 border-white px-4 text-xs font-bold uppercase" onClick={() => setConfirmAbort(false)}>Keep playing</button><button className="min-h-11 flex-1 bg-[var(--status-error)] px-4 text-xs font-bold uppercase text-white" onClick={() => void abortGame()}>Abort game</button></div>
           </div>
         </div>
       )}

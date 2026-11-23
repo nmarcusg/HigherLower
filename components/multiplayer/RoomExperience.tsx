@@ -16,6 +16,8 @@ import {
   type MultiplayerSnapshot,
   type StoredRoomCredential,
 } from "@/lib/backend/multiplayer";
+import { emitAtmosphere } from "@/lib/atmosphere/eventBus";
+import { originFor } from "@/lib/atmosphere/delegation";
 
 type Ack = { ok?: boolean; error?: { code?: string; message?: string }; submitted?: boolean };
 const CARD = "rounded-md border border-white/20 bg-[#1b1734]/90 p-5 shadow-[0_8px_0_var(--accent-classic)] sm:p-7";
@@ -39,6 +41,8 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
   const [busy, setBusy] = useState(false);
   const [remainingMs, setRemainingMs] = useState(0);
   const [answering, setAnswering] = useState(false);
+  const [entry, setEntry] = useState<StoredRoomCredential["entry"]>();
+  const [lastStandings, setLastStandings] = useState<Array<Record<string, unknown>>>([]);
 
   const refreshRoom = useCallback(async (activeCredential: StoredRoomCredential) => {
     try {
@@ -62,6 +66,7 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
       return;
     }
     setCredential(saved);
+    setEntry(saved.entry);
     void refreshRoom(saved);
 
     const socket = connectRoom(saved);
@@ -86,7 +91,13 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
     });
     socket.on("round:opened", (state: MultiplayerSnapshot) => setSnapshot(state));
     socket.on("question:advanced", (state: MultiplayerSnapshot) => setSnapshot(state));
-    socket.on("round:reveal", (state: MultiplayerSnapshot) => setSnapshot(state));
+    socket.on("round:reveal", (state: MultiplayerSnapshot) => {
+      setSnapshot(state);
+      const you = object(state.you);
+      const question = object(state.question);
+      const correct = typeof you.choice === "string" && you.choice === question.correctChoice;
+      emitAtmosphere({ type: "reveal", correct, tier: correct ? 3 : 0, origin: originFor(document.activeElement, ".gameplay-entrance-controls") });
+    });
     socket.on("answer:accepted", () => setAnswering(false));
     socket.on("room:error", (error: { code?: string; message?: string }) => {
       setAnswering(false);
@@ -116,6 +127,13 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
       socketRef.current = null;
     };
   }, [initialSessionId, refreshRoom, router]);
+
+  // Shared-round state intentionally withholds standings until reveal. Keep the
+  // last disclosed standings visible during the next question instead of
+  // blanking the leaderboard between rounds.
+  useEffect(() => {
+    if (Array.isArray(snapshot?.standings)) setLastStandings(snapshot.standings);
+  }, [snapshot?.standings]);
 
   // Lobby joins are HTTP lifecycle operations, so an already-attached host does
   // not receive a socket event when somebody joins. A short, bounded poll keeps
@@ -148,9 +166,10 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
   const leaderboard = useMemo(() => {
     const standings = Array.isArray(snapshot?.standings) ? snapshot.standings : [];
     if (standings.length) return standings;
+    if (lastStandings.length) return lastStandings;
     const players = Array.isArray(snapshot?.players) ? snapshot.players : [];
     return [...players].sort((a, b) => asNumber(a.score) < asNumber(b.score) ? 1 : -1);
-  }, [snapshot?.players, snapshot?.standings]);
+  }, [lastStandings, snapshot?.players, snapshot?.standings]);
   const question = object(snapshot?.question);
   const left = object(question.left);
   const right = object(question.right);
@@ -212,6 +231,7 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
     if (!socket || !question.id || submitted || answering || isSpectator || phase !== "QUESTION") return;
     setAnswering(true);
     setMessage("");
+    emitAtmosphere({ type: "guess", direction: choice === "HIGHER" ? "higher" : "lower", source: "pointer", ...originFor(document.activeElement, ".gameplay-entrance-controls") });
     const requestId = crypto.randomUUID();
     socket.timeout(5000).emit("room:answer", { questionId: question.id, choice, requestId }, (timeoutError: Error | null, ack: Ack) => {
       if (timeoutError) {
@@ -234,8 +254,8 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
         <Link href="/multiplayer" className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-[var(--text-secondary)] hover:text-white"><ArrowLeft size={16} /> Multiplayer lobby</Link>
         <section className={`${CARD} mx-auto mt-16 w-full max-w-xl text-center`}>
           {connection === "connecting" ? <LoaderCircle className="mx-auto mb-4 animate-spin text-[var(--accent-highlight)]" /> : <WifiOff className="mx-auto mb-4 text-[var(--accent-highlight)]" />}
-          <h1 className="text-2xl font-bold text-white">{connection === "connecting" ? "Rejoining room…" : "Room unavailable"}</h1>
-          <p className="mt-3 text-sm text-[var(--text-secondary)]">{message || "Restoring your room and reconnecting to the game."}</p>
+          <h1 className="text-2xl font-bold text-white">{connection === "connecting" ? entry === "create" ? "Opening your room…" : entry === "join" ? "Joining room…" : entry === "spectate" ? "Joining as spectator…" : "Rejoining room…" : "Room unavailable"}</h1>
+          <p className="mt-3 text-sm text-[var(--text-secondary)]">{message || (connection === "connecting" ? "Connecting you to the room." : "This room is no longer available on this device.")}</p>
           {connection === "closed" && <Link href="/multiplayer" className={`${BUTTON} mt-6`}>Return to multiplayer</Link>}
         </section>
       </main>

@@ -9,6 +9,7 @@ interface GameplayShellProps {
   title: string;
   subtitle?: string;
   backHref?: string;
+  onBack?: () => void;
   status?: ReactNode;
   /**
    * Optional full-width row rendered at the bottom of the header, inside the
@@ -35,6 +36,7 @@ export default function GameplayShell({
   title,
   subtitle = "Higher or Lower",
   backHref = "/",
+  onBack,
   status,
   headerFooter,
   children,
@@ -52,6 +54,7 @@ export default function GameplayShell({
               renders behind the face rather than covering it. */}
           <Link
             href={backHref}
+            onClick={onBack ? (event) => { event.preventDefault(); onBack(); } : undefined}
             aria-label="Back to game setup"
             className="group col-start-1 row-start-1 inline-flex h-11 w-11 items-center justify-center rounded-full border-2 border-white bg-[var(--surface-background)] text-white shadow-[4px_4px_0_var(--gameplay-accent)] transition-transform hover:-translate-y-0.5 focus-visible:outline-offset-4"
           >

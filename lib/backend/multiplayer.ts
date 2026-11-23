@@ -42,6 +42,7 @@ export interface MultiplayerSnapshot {
 
 export interface StoredRoomCredential extends RoomCredential {
   nickname?: string;
+  entry?: "create" | "join" | "spectate";
 }
 
 const STORAGE_KEY = "higher-lower:room-credential:v1";
@@ -53,7 +54,10 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 export function readRoomCredential(): StoredRoomCredential | null {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    // Prefer tab-local identity: two people testing or playing from separate
+    // tabs must not overwrite one another's room token. Keep localStorage as a
+    // recovery fallback for an accidentally closed tab.
+    const raw = window.sessionStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (!isObject(parsed) || typeof parsed.sessionId !== "string" || typeof parsed.gameToken !== "string") return null;
@@ -62,6 +66,7 @@ export function readRoomCredential(): StoredRoomCredential | null {
       roomCode: typeof parsed.roomCode === "string" ? parsed.roomCode : "",
       gameToken: parsed.gameToken,
       nickname: typeof parsed.nickname === "string" ? parsed.nickname : undefined,
+      entry: parsed.entry === "create" || parsed.entry === "join" || parsed.entry === "spectate" ? parsed.entry : undefined,
     };
   } catch {
     return null;
@@ -69,12 +74,16 @@ export function readRoomCredential(): StoredRoomCredential | null {
 }
 
 export function storeRoomCredential(credential: StoredRoomCredential): void {
+  window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(credential));
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(credential));
 }
 
 export function clearRoomCredential(sessionId: string): void {
   const current = readRoomCredential();
-  if (current?.sessionId === sessionId) window.localStorage.removeItem(STORAGE_KEY);
+  if (current?.sessionId === sessionId) {
+    window.sessionStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(STORAGE_KEY);
+  }
 }
 
 async function roomRequest<T>(
