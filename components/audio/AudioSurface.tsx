@@ -39,7 +39,6 @@ import {
   playCue,
   startAudioEngine,
   subscribeAudioState,
-  unlockAudio,
   type AudioState,
 } from "@/lib/audio/audioEngine";
 import {
@@ -118,22 +117,6 @@ export default function AudioSurface({ variant }: AudioSurfaceProps) {
 
   // ── Engine wiring (idempotent across every mount) ─────────────────────────
   useEffect(() => startAudioEngine(), []);
-
-  useEffect(() => {
-    function once() {
-      unlockAudio();
-    }
-    // Capture phase on `window` is the first step of the event path, so the
-    // context exists before the `document`-capture classifier runs and the very
-    // first qualifying gesture plays its own cue instead of losing it.
-    const options: AddEventListenerOptions = { passive: true, capture: true };
-    window.addEventListener("pointerdown", once, options);
-    window.addEventListener("keydown", once, options);
-    return () => {
-      window.removeEventListener("pointerdown", once, options);
-      window.removeEventListener("keydown", once, options);
-    };
-  }, []);
 
   // `data-audio-*` — written only on a real settings or lifecycle change.
   useEffect(() => {

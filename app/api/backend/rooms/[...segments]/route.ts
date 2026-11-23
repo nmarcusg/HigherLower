@@ -2,7 +2,7 @@ const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL?.trim().replace(/\/+$/, "") ||
   "https://higherorlower-api.onrender.com/api/v1";
 const ROOM_ID_PATTERN = /^[A-Za-z0-9-]{1,64}$/;
-const ALLOWED_ACTIONS = new Set(["start", "leave", "results", "rematch", "kick", "end"]);
+const ALLOWED_ACTIONS = new Set(["start", "leave", "results", "rematch", "kick", "end", "settings"]);
 
 type RouteContext = { params: Promise<{ segments: string[] }> };
 
@@ -18,13 +18,16 @@ async function proxy(request: Request, context: RouteContext) {
   if (request.method === "POST" && action === "results") {
     return Response.json({ message: "Method not allowed." }, { status: 405 });
   }
+  if (request.method === "PATCH" && action !== "settings") {
+    return Response.json({ message: "Method not allowed." }, { status: 405 });
+  }
 
   const target = `${API_BASE_URL}/rooms/${encodeURIComponent(sessionId)}${action ? `/${action}` : ""}`;
   const headers = new Headers({ Accept: "application/json" });
   const authorization = request.headers.get("authorization");
   if (authorization) headers.set("Authorization", authorization);
   let body: string | undefined;
-  if (request.method === "POST") {
+  if (request.method === "POST" || request.method === "PATCH") {
     headers.set("Content-Type", "application/json");
     body = await request.text();
   }
@@ -51,3 +54,4 @@ async function proxy(request: Request, context: RouteContext) {
 
 export const GET = proxy;
 export const POST = proxy;
+export const PATCH = proxy;

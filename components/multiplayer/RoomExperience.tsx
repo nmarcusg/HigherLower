@@ -103,6 +103,11 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
     });
     socket.on("round:opened", (state: MultiplayerSnapshot) => setSnapshot(state));
     socket.on("question:advanced", (state: MultiplayerSnapshot) => setSnapshot(state));
+    socket.on("standings:updated", (event: { sessionId?: string; standings?: Array<Record<string, unknown>> }) => {
+      if (event.sessionId === saved.sessionId && Array.isArray(event.standings)) {
+        setSnapshot((current) => current ? { ...current, standings: event.standings } : current);
+      }
+    });
     socket.on("round:reveal", (state: MultiplayerSnapshot) => {
       setSnapshot(state);
       const you = object(state.you);
@@ -271,6 +276,17 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
     finally { setBusy(false); }
   }
 
+  async function waitForHostRematch() {
+    if (!credential) return;
+    setBusy(true);
+    try {
+      await refreshRoom(credential);
+      setMessage("You’re in the room. Waiting for the host to start a rematch…");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function answer(choice: "HIGHER" | "LOWER") {
     const socket = socketRef.current;
     if (!socket || !question.id || submitted || answering || isSpectator || phase !== "QUESTION") return;
@@ -293,6 +309,14 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
     });
   }
 
+  const successorSessionId = asText(object(snapshot?.settings).nextSessionId);
+  useEffect(() => {
+    if (!credential || !successorSessionId || successorSessionId === credential.sessionId) return;
+    const nextCredential = { ...credential, sessionId: successorSessionId, state: undefined };
+    storeRoomCredential(nextCredential);
+    router.replace(`/multiplayer/room/${encodeURIComponent(successorSessionId)}`);
+  }, [credential, router, successorSessionId]);
+
   if (!credential || !snapshot) {
     return (
       <main className="relative z-10 mx-auto flex min-h-dvh w-full max-w-5xl flex-col px-5 py-6 sm:px-8 sm:py-10">
@@ -311,11 +335,10 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
   const connected = connection === "connected";
   const cancelled = status === "CANCELLED";
   const finished = status === "FINISHED" || phase === "FINISHED";
-
   return (
     <main className="relative z-10 mx-auto flex min-h-dvh w-full max-w-6xl flex-col px-5 py-6 sm:px-8 sm:py-10">
       <header className="flex flex-wrap items-center justify-between gap-4">
-        <Link href="/multiplayer" onClick={(event) => { event.preventDefault(); void exitRoom(); }} className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-[var(--text-secondary)] transition hover:text-white"><ArrowLeft size={16} /> Leave room</Link>
+        {!finished && <Link href="/multiplayer" onClick={(event) => { event.preventDefault(); void exitRoom(); }} className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-[var(--text-secondary)] transition hover:text-white"><ArrowLeft size={16} /> Leave room</Link>}
         <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">
           {connected ? <Wifi size={12} className="text-[var(--accent-highlight)]" /> : <WifiOff size={12} className="text-amber-300" />}
           {connected ? "Connected" : "Reconnecting"}
@@ -357,7 +380,7 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
         {(status === "RUNNING" || status === "FINALIZING") && (
           <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
             <section className={CARD}>
-              <div className="mb-6 flex flex-wrap items-center justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-action-higher)]">{isSpectator ? "Live leaderboard" : isScoreRace ? "Race clock" : `Round ${currentRound}${totalRounds ? ` of ${totalRounds}` : ""}`}</p><h2 className="mt-1 text-2xl font-bold">{phaseLabel(phase)}</h2></div><div className="flex items-center gap-3">{mode.includes("HP") && !isSpectator && <div className="min-w-32"><div className="mb-1 flex justify-between text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]"><span>Health</span><span>{hp}/100</span></div><div className="h-2 overflow-hidden rounded-full border border-white/20 bg-white/10"><div className="h-full bg-[var(--status-success)] transition-[width] duration-300" style={{ width: `${hp}%` }} /></div></div>}<div className="rounded-sm border border-white/20 bg-white/[0.04] px-4 py-2 text-lg font-bold tabular-nums text-[var(--accent-highlight)]">{formatSeconds(remainingMs)}</div></div></div>
+              <div className="mb-6 flex flex-wrap items-center justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-action-higher)]">{isSpectator ? "Live leaderboard" : isScoreRace ? "Race clock" : `Round ${currentRound}${totalRounds ? ` of ${totalRounds}` : ""}`}</p><h2 className="mt-1 text-2xl font-bold">{phaseLabel(phase)}</h2>{!isSpectator && !isScoreRace && (phase === "QUESTION" || phase === "REVEAL") && <p className="mt-1 text-xs text-[var(--text-secondary)]">{asNumber(snapshot.answeredCount)} of {asNumber(snapshot.totalAnswerers, playerCount)} players answered</p>}</div><div className="flex items-center gap-3">{mode.includes("HP") && !isSpectator && <div className="min-w-32"><div className="mb-1 flex justify-between text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]"><span>Health</span><span>{hp}/100</span></div><div className="h-2 overflow-hidden rounded-full border border-white/20 bg-white/10"><div className="h-full bg-[var(--status-success)] transition-[width] duration-300" style={{ width: `${hp}%` }} /></div></div>}<div className="rounded-sm border border-white/20 bg-white/[0.04] px-4 py-2 text-lg font-bold tabular-nums text-[var(--accent-highlight)]">{formatSeconds(remainingMs)}</div></div></div>
               {isSpectator ? (
                 question.id ? (
                   <>
@@ -395,7 +418,7 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
           </div>
         )}
 
-        {finished && <div className="grid gap-5 md:grid-cols-[0.8fr_1fr]"><section className={`${CARD} text-center`}><Trophy className="mx-auto mb-4 text-[var(--accent-highlight)]" size={30} /><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-action-higher)]">Match complete</p><h2 className="mt-2 text-3xl font-bold">{isSpectator ? "Final leaderboard" : "Your final score"}</h2>{!isSpectator && <p className="mt-3 text-5xl font-black text-[var(--accent-highlight)]">{finalScore}</p>}<p className="mt-3 text-xs leading-5 text-[var(--text-muted)]">Results are saved. You can leave this room or start a rematch.</p><div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">{isHost && !isSpectator && <button className={BUTTON} disabled={busy} onClick={() => void rematch()}><RotateCcw size={14} /> Rematch</button>}</div></section><Leaderboard snapshot={snapshot} entries={leaderboard} isSpectator={isSpectator} results={results} matchRemainingMs={matchRemainingMs} /></div>}
+        {finished && <div className="grid gap-5 md:grid-cols-[0.8fr_1fr]"><section className={`${CARD} text-center`}><Trophy className="mx-auto mb-4 text-[var(--accent-highlight)]" size={30} /><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-action-higher)]">Match complete</p><h2 className="mt-2 text-3xl font-bold">{isSpectator ? "Final leaderboard" : "Your final score"}</h2>{!isSpectator && <p className="mt-3 text-5xl font-black text-[var(--accent-highlight)]">{finalScore}</p>}<p className="mt-3 text-xs leading-5 text-[var(--text-muted)]">{isHost && !isSpectator ? "Start a rematch to open the next room, or leave for multiplayer." : "Stay in this room to follow the host’s rematch, or leave for multiplayer."}</p><div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">{isHost && !isSpectator ? <button className={BUTTON} disabled={busy} onClick={() => void rematch()}><RotateCcw size={14} /> Rematch</button> : <button className={OUTLINE} disabled={busy} onClick={() => void waitForHostRematch()}>{busy ? "Checking room…" : "Wait for host rematch"}</button>}<button className={OUTLINE} disabled={busy} onClick={() => void exitRoom()}><LogOut size={14} /> Leave to multiplayer</button></div></section><Leaderboard snapshot={snapshot} entries={leaderboard} isSpectator={isSpectator} results={results} matchRemainingMs={matchRemainingMs} /></div>}
         {cancelled && <section className={`${CARD} mx-auto max-w-xl text-center`}><h2 className="text-2xl font-bold">Room ended</h2><p className="mt-3 text-sm text-[var(--text-secondary)]">The host ended this room. You can return to multiplayer or join another room.</p><Link className={`${BUTTON} mt-6`} href="/multiplayer">Return to multiplayer</Link></section>}
 
         {status === "LOBBY" && isSpectator && <div className="grid gap-5 md:grid-cols-[1fr_300px]"><section className={CARD}><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-action-higher)]">Spectator seat</p><h2 className="mt-1 text-2xl font-bold">Waiting for the match</h2><p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">The leaderboard will appear when the host starts. You’ll only see player scores and mode stats.</p></section><Leaderboard snapshot={snapshot} entries={leaderboard} isSpectator results={results} matchRemainingMs={matchRemainingMs} /></div>}
@@ -407,7 +430,7 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
 
 function PlayerRow({ player }: { player: Record<string, unknown> }) {
   const spectator = player.role === "SPECTATOR";
-  return <div className="flex items-center justify-between gap-3 rounded-sm border border-white/10 bg-white/[0.025] px-3 py-3"><div className="flex min-w-0 items-center gap-3"><span className="grid size-8 shrink-0 place-items-center rounded-sm bg-white/10 text-xs font-bold text-[var(--accent-highlight)]">{asText(player.nickname, "?").slice(0, 1).toUpperCase()}</span><div className="min-w-0"><p className="truncate text-sm font-bold text-white">{asText(player.nickname, "Player")}</p><p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">{spectator ? "Spectator" : player.isHost === true ? "Host" : "Player"}</p></div></div>{player.isHost === true && <Crown size={15} className="text-[var(--accent-highlight)]" aria-label="Host" />}</div>;
+  return <div className="flex items-center justify-between gap-3 rounded-sm border border-white/10 bg-white/[0.025] px-3 py-3"><div className="flex min-w-0 items-center gap-3"><span className="grid size-8 shrink-0 place-items-center rounded-sm bg-white/10 text-xs font-bold text-[var(--accent-highlight)]">{asText(player.nickname, "?").slice(0, 1).toUpperCase()}</span><div className="min-w-0"><p className="truncate text-sm font-bold text-white">{asText(player.nickname, "Player")}</p><p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">{spectator ? "Spectator" : player.isHost === true ? "Host" : "Player"}{typeof player.connected === "boolean" ? ` · ${player.connected ? "Connected" : "Disconnected"}` : ""}</p></div></div>{player.isHost === true && <Crown size={15} className="text-[var(--accent-highlight)]" aria-label="Host" />}</div>;
 }
 
 
@@ -520,12 +543,17 @@ function QuestionCard({ item, label, revealed }: { item: Record<string, unknown>
 function Leaderboard({ snapshot, entries, isSpectator, results, matchRemainingMs }: { snapshot: MultiplayerSnapshot; entries: Array<Record<string, unknown>>; isSpectator: boolean; results?: Record<string, unknown> | null; matchRemainingMs: number }) {
   const mode = asText(snapshot.mode);
   const statsByActor = new Map<string, Record<string, unknown>>();
+  const presenceByActor = new Map<string, Record<string, unknown>>();
+  if (Array.isArray(snapshot.players)) for (const player of snapshot.players) if (typeof player.actorId === "string") presenceByActor.set(player.actorId, player);
   if (Array.isArray(results?.players)) for (const player of results.players) if (typeof player.actorId === "string") statsByActor.set(player.actorId, player);
   return <aside className={CARD} aria-label="Leaderboard"><div className="mb-5 flex items-center justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-time-attack)]">{isSpectator ? "Tournament view" : "Standings"}</p><h2 className="mt-1 text-xl font-bold">Leaderboard</h2></div><Trophy size={19} className="text-[var(--accent-highlight)]" /></div><ol className="space-y-2">{entries.map((entry, index) => {
     const actorId = asText(entry.actorId);
     const stats = statsByActor.get(actorId) ?? entry;
-    return <li key={actorId || index} className={`rounded-sm border border-white/10 bg-white/[0.025] px-3 py-3 ${stats.eliminated === true || stats.connected === false || entry.connected === false ? "opacity-45 grayscale" : ""}`}><div className="flex items-center gap-3"><span className={`grid size-8 shrink-0 place-items-center rounded-sm text-xs font-black ${index === 0 ? "bg-[var(--accent-highlight)] text-[#201b3b]" : "bg-white/10 text-white"}`}>{asNumber(entry.rank, index + 1)}</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold text-white">{asText(entry.nickname, "Player")}</p><p className="text-[10px] text-[var(--text-muted)]">{stats.eliminated === true ? "Eliminated" : stats.connected === false ? "Disconnected" : asText(snapshot.status) === "FINISHED" ? "Match finished" : asText(snapshot.phase) === "QUESTION" || asText(snapshot.phase) === "REVEAL" ? entry.answered === true || stats.answered === true ? "Answered" : "Choosing…" : "In match"}</p></div><strong className="text-sm tabular-nums text-[var(--accent-highlight)]">{asNumber(entry.score)}</strong></div><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 pl-11 text-[10px] text-[var(--text-muted)]">{mode.includes("HP") && <span>HP {asNumber(entry.hp, asNumber(stats.finalHp, 0))}</span>}{mode.includes("STREAK") && <span>Streak {asNumber(entry.streak, asNumber(stats.maxStreak, 0))}</span>}{(entry.roundNumber !== undefined || snapshot.roundNumber !== undefined) && <span>Round {asNumber(entry.roundNumber, asNumber(snapshot.roundNumber))}{snapshot.totalRounds ? `/${snapshot.totalRounds}` : ""}</span>}{snapshot.matchEndsAt && <span>Time {formatSeconds(matchRemainingMs)}</span>}</div></li>;
-  })}</ol>{entries.length === 0 && <div className="rounded-sm border border-dashed border-white/15 p-5 text-center text-xs text-[var(--text-muted)]"><Users className="mx-auto mb-2" size={17} />Scores will appear once play begins.</div>}<p className="mt-4 border-t border-white/10 pt-3 text-[10px] leading-4 text-[var(--text-muted)]">{isSpectator ? "Read-only score and mode stats. No questions or answers are sent to spectators." : "Scores update after each shared reveal or as players progress through Score Race."}</p></aside>;
+    const presence = presenceByActor.get(actorId) ?? {};
+    const connected = typeof presence.connected === "boolean" ? presence.connected : typeof entry.connected === "boolean" ? entry.connected : stats.connected;
+    const answered = typeof presence.answered === "boolean" ? presence.answered : typeof entry.answered === "boolean" ? entry.answered : stats.answered;
+    return <li key={actorId || index} className={`rounded-sm border border-white/10 bg-white/[0.025] px-3 py-3 ${stats.eliminated === true || connected === false ? "opacity-45 grayscale" : ""}`}><div className="flex items-center gap-3"><span className={`grid size-8 shrink-0 place-items-center rounded-sm text-xs font-black ${index === 0 ? "bg-[var(--accent-highlight)] text-[#201b3b]" : "bg-white/10 text-white"}`}>{asNumber(entry.rank, index + 1)}</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold text-white">{asText(entry.nickname, "Player")}</p><p className="text-[10px] text-[var(--text-muted)]">{stats.eliminated === true ? "Eliminated" : connected === false ? "Disconnected" : asText(snapshot.status) === "FINISHED" ? "Match finished" : asText(snapshot.phase) === "QUESTION" || asText(snapshot.phase) === "REVEAL" ? answered === true ? "Answered" : "Choosing…" : "In match"}</p></div><strong className="text-sm tabular-nums text-[var(--accent-highlight)]">{asNumber(entry.score)}</strong></div><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 pl-11 text-[10px] text-[var(--text-muted)]">{mode.includes("HP") && <span>HP {asNumber(entry.hp, asNumber(stats.finalHp, 0))}</span>}{mode.includes("STREAK") && <span>Streak {asNumber(entry.streak, asNumber(stats.maxStreak, 0))}</span>}{(entry.roundNumber !== undefined || snapshot.roundNumber !== undefined) && <span>Round {asNumber(entry.roundNumber, asNumber(snapshot.roundNumber))}{snapshot.totalRounds ? `/${snapshot.totalRounds}` : ""}</span>}{snapshot.matchEndsAt && <span>Time {formatSeconds(matchRemainingMs)}</span>}</div></li>;
+  })}</ol>{entries.length === 0 && <div className="rounded-sm border border-dashed border-white/15 p-5 text-center text-xs text-[var(--text-muted)]"><Users className="mx-auto mb-2" size={17} />Scores will appear once play begins.</div>}<p className="mt-4 border-t border-white/10 pt-3 text-[10px] leading-4 text-[var(--text-muted)]">{isSpectator ? mode === "PVP_SCORE_RACE" ? "Read-only score and mode stats. Score Race questions and answers are not shared with spectators." : "Read-only shared question view and leaderboard. Player answers and choices are never exposed." : "Scores update after each shared reveal or as players progress through Score Race."}</p></aside>;
 }
 
 function modeLabel(mode: string): string { return mode.replace(/^PVP_/, "").replaceAll("_", " "); }

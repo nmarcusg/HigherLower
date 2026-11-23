@@ -40,6 +40,8 @@ interface EngineState {
   lastPlayed: Map<CueName, number>;
   pending: Array<{ name: CueName; at: number }>;
   started: boolean;
+  startOwners: number;
+  stop: (() => void) | null;
 }
 
 const state: EngineState = {
@@ -51,6 +53,8 @@ const state: EngineState = {
   lastPlayed: new Map(),
   pending: [],
   started: false,
+  startOwners: 0,
+  stop: null,
 };
 
 // ─── Observable lifecycle state (for `data-audio-state` and `aria`) ──────────
@@ -406,36 +410,41 @@ function onVisibilityChange() {
 
 /** Wire the engine to the bus, the settings store and visibility. Idempotent. */
 export function startAudioEngine(): () => void {
-  if (state.started) return () => {};
-  state.started = true;
+  state.startOwners += 1;
+  let released = false;
+  if (!state.started) {
+    state.started = true;
 
-  const unsubscribeBus = subscribeAtmosphere(handleAtmosphereEvent);
-  const unsubscribeSettings = subscribeAudioSettings(() => applySettings());
-  document.addEventListener("visibilitychange", onVisibilityChange);
+    const unsubscribeBus = subscribeAtmosphere(handleAtmosphereEvent);
+    const unsubscribeSettings = subscribeAudioSettings(() => applySettings());
+    document.addEventListener("visibilitychange", onVisibilityChange);
 
-  // Any first gesture anywhere unlocks the context, even when the visible audio
-  // control has never been touched.
-  const gestureOptions: AddEventListenerOptions = { passive: true, capture: true };
-  const onFirstGesture = () => {
-    unlockAudio();
-    window.removeEventListener("pointerdown", onFirstGesture, gestureOptions);
-    window.removeEventListener("keydown", onFirstGesture, gestureOptions);
-    window.removeEventListener("touchstart", onFirstGesture, gestureOptions);
-  };
-  window.addEventListener("pointerdown", onFirstGesture, gestureOptions);
-  window.addEventListener("keydown", onFirstGesture, gestureOptions);
-  window.addEventListener("touchstart", onFirstGesture, gestureOptions);
+    // Retry unlock on later gestures if the browser suspends audio again.
+    const gestureOptions: AddEventListenerOptions = { passive: true, capture: true };
+    const onGesture = () => unlockAudio();
+    window.addEventListener("pointerdown", onGesture, gestureOptions);
+    window.addEventListener("keydown", onGesture, gestureOptions);
+    window.addEventListener("touchstart", onGesture, gestureOptions);
 
-  if (audioState !== "off" && !isAudioSupported()) setAudioState("off");
+    if (audioState !== "off" && !isAudioSupported()) setAudioState("off");
+
+    state.stop = () => {
+      unsubscribeBus();
+      unsubscribeSettings();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("pointerdown", onGesture, gestureOptions);
+      window.removeEventListener("keydown", onGesture, gestureOptions);
+      window.removeEventListener("touchstart", onGesture, gestureOptions);
+      state.started = false;
+      state.stop = null;
+    };
+  }
 
   return () => {
-    unsubscribeBus();
-    unsubscribeSettings();
-    document.removeEventListener("visibilitychange", onVisibilityChange);
-    window.removeEventListener("pointerdown", onFirstGesture, gestureOptions);
-    window.removeEventListener("keydown", onFirstGesture, gestureOptions);
-    window.removeEventListener("touchstart", onFirstGesture, gestureOptions);
-    state.started = false;
+    if (released) return;
+    released = true;
+    state.startOwners = Math.max(0, state.startOwners - 1);
+    if (state.startOwners === 0) state.stop?.();
   };
 }
 

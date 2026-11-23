@@ -41,6 +41,7 @@ export default async function SoloGameplayLoader({
     return (
       <BackendSoloGame
         playsetId={category.playsetId}
+        categoryId={categoryId}
         categoryLabel={categoryLabel}
         mode={mode}
       />

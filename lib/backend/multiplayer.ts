@@ -17,7 +17,16 @@ export interface MultiplayerSnapshot {
   rulesVersion?: string;
   hostActorId?: string;
   you?: { actorId?: string; nickname?: string; isHost?: boolean; role?: "PLAYER" | "SPECTATOR"; submitted?: boolean } | null;
-  players?: Array<Record<string, unknown>>;
+  players?: Array<{
+    actorId?: string;
+    nickname?: string;
+    role?: "PLAYER" | "SPECTATOR";
+    isHost?: boolean;
+    connected?: boolean;
+    answered?: boolean;
+    score?: number;
+    [key: string]: unknown;
+  }>;
   capacity?: { minPlayers?: number; maxPlayers?: number; current?: number };
   settings?: Record<string, unknown>;
   serverNow?: number;
@@ -40,6 +49,7 @@ export interface MultiplayerSnapshot {
   roundResult?: Record<string, unknown> | null;
   readOnly?: boolean;
   answeredCount?: number;
+  totalAnswerers?: number;
 }
 
 export interface StoredRoomCredential extends RoomCredential {

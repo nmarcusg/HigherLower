@@ -11,6 +11,7 @@ import GameplayDivider from "@/components/game/GameplayDivider";
 import DecisionControls from "@/components/game/DecisionControls";
 import GameplayStatus from "@/components/game/GameplayStatus";
 import type { GameItem } from "@/types/api";
+import type { SemanticCategoryId } from "@/types/game";
 import {
   answerSoloQuestion,
   createSoloSession,
@@ -31,6 +32,7 @@ import type {
 
 interface BackendSoloGameProps {
   playsetId: string;
+  categoryId?: SemanticCategoryId;
   categoryLabel: string;
   mode: GameplayMode;
 }
@@ -77,10 +79,9 @@ function isIgnoredKeyTarget(event: KeyboardEvent): boolean {
   return Boolean(target.closest("input, textarea, select, button, a[href], [contenteditable], [role='button']"));
 }
 
-import { semanticCategoryIdForBackend } from "@/lib/backend/catalogProjection";
 import { writeHighScore } from "@/lib/highScores/storage";
 
-export default function BackendSoloGame({ playsetId, categoryLabel, mode }: BackendSoloGameProps) {
+export default function BackendSoloGame({ playsetId, categoryId, categoryLabel, mode }: BackendSoloGameProps) {
   const router = useRouter();
   const apiMode: SoloMode = mode === "time-attack" ? "TIME_ATTACK" : "CLASSIC";
   const storageKey = useMemo(() => `higher-lower:solo:v1:${apiMode}:${playsetId}`, [apiMode, playsetId]);
@@ -348,11 +349,10 @@ export default function BackendSoloGame({ playsetId, categoryLabel, mode }: Back
 
   useEffect(() => {
     if (phase !== "game-over" || state?.status !== "FINISHED") return;
-    const categoryId = semanticCategoryIdForBackend(playsetId);
     if (!categoryId) return;
     const finalScore = Math.max(0, Math.trunc(Number(state.score) || 0));
     writeHighScore({ mode: apiMode === "TIME_ATTACK" ? "time-attack" : "classic", categoryId }, finalScore);
-  }, [apiMode, phase, playsetId, state?.score, state?.status]);
+  }, [apiMode, categoryId, phase, playsetId, state?.score, state?.status]);
 
   useEffect(() => {
     if (phase !== "game-over" || !credential || state?.status !== "FINISHED") return;
