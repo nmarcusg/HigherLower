@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowLeft, ArrowUp, Check, Crown, LoaderCircle, LogOut, RotateCcw, Trophy, Users, Wifi, WifiOff } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Check, Copy, Crown, LoaderCircle, LogOut, RotateCcw, Trophy, Users, Wifi, WifiOff } from "lucide-react";
 import type { Socket } from "socket.io-client";
 import {
   clearRoomCredential,
@@ -40,8 +40,10 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [remainingMs, setRemainingMs] = useState(0);
+  const [matchRemainingMs, setMatchRemainingMs] = useState(0);
   const [answering, setAnswering] = useState(false);
   const [entry, setEntry] = useState<StoredRoomCredential["entry"]>();
+  const [copiedCode, setCopiedCode] = useState(false);
   const [lastStandings, setLastStandings] = useState<Array<Record<string, unknown>>>([]);
 
   const refreshRoom = useCallback(async (activeCredential: StoredRoomCredential) => {
@@ -61,13 +63,20 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
   useEffect(() => {
     const saved = readRoomCredential();
     if (!saved || saved.sessionId !== initialSessionId) {
-      setConnection("closed");
-      setMessage("This room link is no longer available on this device. Rejoin with the room code.");
+      // Browser-only bootstrap; defer so the effect never writes state synchronously.
+      queueMicrotask(() => {
+        setConnection("closed");
+        setMessage("This room link is no longer available on this device. Rejoin with the room code.");
+      });
       return;
     }
-    setCredential(saved);
-    setEntry(saved.entry);
-    void refreshRoom(saved);
+    // Same browser-only bootstrap; keep the effect free of synchronous writes.
+    queueMicrotask(() => {
+      setCredential(saved);
+      setEntry(saved.entry);
+      if (saved.state?.sessionId === saved.sessionId) setSnapshot(saved.state);
+    });
+    queueMicrotask(() => { void refreshRoom(saved); });
 
     const socket = connectRoom(saved);
     socketRef.current = socket;
@@ -132,7 +141,8 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
   // last disclosed standings visible during the next question instead of
   // blanking the leaderboard between rounds.
   useEffect(() => {
-    if (Array.isArray(snapshot?.standings)) setLastStandings(snapshot.standings);
+    const standings = snapshot?.standings;
+    if (Array.isArray(standings)) queueMicrotask(() => setLastStandings(standings));
   }, [snapshot?.standings]);
 
   // Lobby joins are HTTP lifecycle operations, so an already-attached host does
@@ -152,6 +162,7 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
         ? asNumber(snapshot.phaseEndsAt, asNumber(snapshot.startsAt))
         : asNumber(question.closesAt, asNumber(snapshot.roundClosesAt, asNumber(snapshot.phaseEndsAt, asNumber(snapshot.matchEndsAt))));
       setRemainingMs(target ? target - Date.now() : 0);
+      setMatchRemainingMs(asNumber(snapshot.matchEndsAt) ? asNumber(snapshot.matchEndsAt) - Date.now() : 0);
     }, 250);
     return () => window.clearInterval(ticker);
   }, [snapshot]);
@@ -169,7 +180,7 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
     if (lastStandings.length) return lastStandings;
     const players = Array.isArray(snapshot?.players) ? snapshot.players : [];
     return [...players].sort((a, b) => asNumber(a.score) < asNumber(b.score) ? 1 : -1);
-  }, [lastStandings, snapshot?.players, snapshot?.standings]);
+  }, [lastStandings, snapshot]);
   const question = object(snapshot?.question);
   const left = object(question.left);
   const right = object(question.right);
@@ -192,6 +203,23 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
   // previously displayed final score into zero.
   const finalScore = asNumber(object(savedPlayer).score, asNumber(object(persistedPlayer).score, score));
   const hp = Math.max(0, Math.min(100, asNumber(you.hp)));
+
+  async function copyRoomCode() {
+    const code = asText(snapshot?.roomCode, credential?.roomCode ?? "");
+    if (!code) {
+      setMessage("Room code is not available yet.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopiedCode(true);
+      setMessage("Room code copied. Share it with your players.");
+      window.setTimeout(() => setCopiedCode(false), 1800);
+    } catch {
+      setCopiedCode(false);
+      setMessage(`Copy was blocked. Room code: ${code}`);
+    }
+  }
 
   async function startRoom() {
     if (!credential) return;
@@ -256,8 +284,8 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
         <Link href="/multiplayer" className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-[var(--text-secondary)] hover:text-white"><ArrowLeft size={16} /> Multiplayer lobby</Link>
         <section className={`${CARD} mx-auto mt-16 w-full max-w-xl text-center`}>
           {connection === "connecting" ? <LoaderCircle className="mx-auto mb-4 animate-spin text-[var(--accent-highlight)]" /> : <WifiOff className="mx-auto mb-4 text-[var(--accent-highlight)]" />}
-          <h1 className="text-2xl font-bold text-white">{connection === "connecting" ? entry === "create" ? "Opening your room…" : entry === "join" ? "Joining room…" : entry === "spectate" ? "Joining as spectator…" : "Rejoining room…" : "Room unavailable"}</h1>
-          <p className="mt-3 text-sm text-[var(--text-secondary)]">{message || (connection === "connecting" ? "Connecting you to the room." : "This room is no longer available on this device.")}</p>
+          <h1 className="text-2xl font-bold text-white">{connection === "closed" ? "Room unavailable" : entry === "create" ? "Opening your room…" : entry === "join" ? "Joining room…" : entry === "spectate" ? "Joining as spectator…" : "Rejoining room…"}</h1>
+          <p className="mt-3 text-sm text-[var(--text-secondary)]">{message || (connection === "closed" ? "This room is no longer available on this device." : "Connecting you to the room. We’ll keep trying automatically.")}</p>
           {connection === "closed" && <Link href="/multiplayer" className={`${BUTTON} mt-6`}>Return to multiplayer</Link>}
         </section>
       </main>
@@ -299,7 +327,7 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
                 {playersForList.map((player) => <PlayerRow key={asText(player.actorId)} player={player} />)}
                 {playersForList.length === 0 && <p className="text-sm text-[var(--text-muted)]">Loading players…</p>}
               </div>
-              <p className="mt-5 border-t border-white/10 pt-4 text-xs leading-5 text-[var(--text-muted)]">Share room code <strong className="tracking-[0.2em] text-white">{snapshot.roomCode || credential.roomCode}</strong> with players joining this match.</p>
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4"><p className="text-xs leading-5 text-[var(--text-muted)]">Share room code <strong className="tracking-[0.2em] text-white">{snapshot.roomCode || credential.roomCode}</strong> with players joining this match.</p><button type="button" className={OUTLINE} onClick={() => void copyRoomCode()}><Copy size={14} />{copiedCode ? "Copied" : "Copy code"}</button></div>
             </section>
             <section className={`${CARD} flex flex-col justify-between`}>
               <div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-time-attack)]">Match settings</p><h2 className="mt-1 text-2xl font-bold">{modeLabel(mode)}</h2><SettingsSummary snapshot={snapshot} /></div>
@@ -334,14 +362,14 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
               )}
               {!isSpectator && <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 border-t border-white/10 pt-4 text-xs text-[var(--text-secondary)]"><span>Score <strong className="text-white">{score}</strong></span>{mode.includes("STREAK") && <span>Streak <strong className="text-white">{asNumber(you.streak)}</strong></span>}{mode.includes("HP") && <span>Health <strong className="text-white">{asNumber(you.hp)}/100</strong></span>}</div>}
             </section>
-            <Leaderboard snapshot={snapshot} entries={leaderboard} isSpectator={isSpectator} />
+            <Leaderboard snapshot={snapshot} entries={leaderboard} isSpectator={isSpectator} matchRemainingMs={matchRemainingMs} />
           </div>
         )}
 
-        {finished && <div className="grid gap-5 md:grid-cols-[0.8fr_1fr]"><section className={`${CARD} text-center`}><Trophy className="mx-auto mb-4 text-[var(--accent-highlight)]" size={30} /><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-action-higher)]">Match complete</p><h2 className="mt-2 text-3xl font-bold">{isSpectator ? "Final leaderboard" : "Your final score"}</h2>{!isSpectator && <p className="mt-3 text-5xl font-black text-[var(--accent-highlight)]">{finalScore}</p>}<p className="mt-3 text-xs leading-5 text-[var(--text-muted)]">Results are saved. You can leave this room or start a rematch.</p><div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">{isHost && !isSpectator && <button className={BUTTON} disabled={busy} onClick={() => void rematch()}><RotateCcw size={14} /> Rematch</button>}<button className={OUTLINE} disabled={busy} onClick={() => void exitRoom()}><LogOut size={14} /> Back to lobby</button></div></section><Leaderboard snapshot={snapshot} entries={leaderboard} isSpectator={isSpectator} results={results} /></div>}
+        {finished && <div className="grid gap-5 md:grid-cols-[0.8fr_1fr]"><section className={`${CARD} text-center`}><Trophy className="mx-auto mb-4 text-[var(--accent-highlight)]" size={30} /><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-action-higher)]">Match complete</p><h2 className="mt-2 text-3xl font-bold">{isSpectator ? "Final leaderboard" : "Your final score"}</h2>{!isSpectator && <p className="mt-3 text-5xl font-black text-[var(--accent-highlight)]">{finalScore}</p>}<p className="mt-3 text-xs leading-5 text-[var(--text-muted)]">Results are saved. You can leave this room or start a rematch.</p><div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">{isHost && !isSpectator && <button className={BUTTON} disabled={busy} onClick={() => void rematch()}><RotateCcw size={14} /> Rematch</button>}<button className={OUTLINE} disabled={busy} onClick={() => void exitRoom()}><LogOut size={14} /> Back to lobby</button></div></section><Leaderboard snapshot={snapshot} entries={leaderboard} isSpectator={isSpectator} results={results} matchRemainingMs={matchRemainingMs} /></div>}
         {cancelled && <section className={`${CARD} mx-auto max-w-xl text-center`}><h2 className="text-2xl font-bold">Room ended</h2><p className="mt-3 text-sm text-[var(--text-secondary)]">The host ended this room. You can return to multiplayer or join another room.</p><Link className={`${BUTTON} mt-6`} href="/multiplayer">Return to multiplayer</Link></section>}
 
-        {status === "LOBBY" && isSpectator && <div className="grid gap-5 md:grid-cols-[1fr_300px]"><section className={CARD}><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-action-higher)]">Spectator seat</p><h2 className="mt-1 text-2xl font-bold">Waiting for the match</h2><p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">The leaderboard will appear when the host starts. You’ll only see player scores and mode stats.</p></section><Leaderboard snapshot={snapshot} entries={leaderboard} isSpectator results={results} /></div>}
+        {status === "LOBBY" && isSpectator && <div className="grid gap-5 md:grid-cols-[1fr_300px]"><section className={CARD}><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-action-higher)]">Spectator seat</p><h2 className="mt-1 text-2xl font-bold">Waiting for the match</h2><p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">The leaderboard will appear when the host starts. You’ll only see player scores and mode stats.</p></section><Leaderboard snapshot={snapshot} entries={leaderboard} isSpectator results={results} matchRemainingMs={matchRemainingMs} /></div>}
       </section>
       <footer className="pb-2 text-center text-[10px] uppercase tracking-[0.12em] text-white/35">Higher or Lower · Party mode</footer>
     </main>
@@ -367,14 +395,14 @@ function QuestionCard({ item, label, revealed }: { item: Record<string, unknown>
   </div>;
 }
 
-function Leaderboard({ snapshot, entries, isSpectator, results }: { snapshot: MultiplayerSnapshot; entries: Array<Record<string, unknown>>; isSpectator: boolean; results?: Record<string, unknown> | null }) {
+function Leaderboard({ snapshot, entries, isSpectator, results, matchRemainingMs }: { snapshot: MultiplayerSnapshot; entries: Array<Record<string, unknown>>; isSpectator: boolean; results?: Record<string, unknown> | null; matchRemainingMs: number }) {
   const mode = asText(snapshot.mode);
   const statsByActor = new Map<string, Record<string, unknown>>();
   if (Array.isArray(results?.players)) for (const player of results.players) if (typeof player.actorId === "string") statsByActor.set(player.actorId, player);
   return <aside className={CARD} aria-label="Leaderboard"><div className="mb-5 flex items-center justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-time-attack)]">{isSpectator ? "Tournament view" : "Standings"}</p><h2 className="mt-1 text-xl font-bold">Leaderboard</h2></div><Trophy size={19} className="text-[var(--accent-highlight)]" /></div><ol className="space-y-2">{entries.map((entry, index) => {
     const actorId = asText(entry.actorId);
     const stats = statsByActor.get(actorId) ?? entry;
-    return <li key={actorId || index} className="rounded-sm border border-white/10 bg-white/[0.025] px-3 py-3"><div className="flex items-center gap-3"><span className={`grid size-8 shrink-0 place-items-center rounded-sm text-xs font-black ${index === 0 ? "bg-[var(--accent-highlight)] text-[#201b3b]" : "bg-white/10 text-white"}`}>{asNumber(entry.rank, index + 1)}</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold text-white">{asText(entry.nickname, "Player")}</p><p className="text-[10px] text-[var(--text-muted)]">{stats.eliminated === true ? "Eliminated" : stats.connected === false ? "Disconnected" : "In match"}</p></div><strong className="text-sm tabular-nums text-[var(--accent-highlight)]">{asNumber(entry.score)}</strong></div><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 pl-11 text-[10px] text-[var(--text-muted)]">{mode.includes("HP") && <span>HP {asNumber(entry.hp, asNumber(stats.finalHp, 0))}</span>}{mode.includes("STREAK") && <span>Streak {asNumber(entry.streak, asNumber(stats.maxStreak, 0))}</span>}{snapshot.roundNumber !== undefined && <span>Round {asNumber(snapshot.roundNumber)}{snapshot.totalRounds ? `/${snapshot.totalRounds}` : ""}</span>}{snapshot.matchEndsAt && <span>Time {formatSeconds(asNumber(snapshot.matchEndsAt) - Date.now())}</span>}</div></li>;
+    return <li key={actorId || index} className="rounded-sm border border-white/10 bg-white/[0.025] px-3 py-3"><div className="flex items-center gap-3"><span className={`grid size-8 shrink-0 place-items-center rounded-sm text-xs font-black ${index === 0 ? "bg-[var(--accent-highlight)] text-[#201b3b]" : "bg-white/10 text-white"}`}>{asNumber(entry.rank, index + 1)}</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold text-white">{asText(entry.nickname, "Player")}</p><p className="text-[10px] text-[var(--text-muted)]">{stats.eliminated === true ? "Eliminated" : stats.connected === false ? "Disconnected" : "In match"}</p></div><strong className="text-sm tabular-nums text-[var(--accent-highlight)]">{asNumber(entry.score)}</strong></div><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 pl-11 text-[10px] text-[var(--text-muted)]">{mode.includes("HP") && <span>HP {asNumber(entry.hp, asNumber(stats.finalHp, 0))}</span>}{mode.includes("STREAK") && <span>Streak {asNumber(entry.streak, asNumber(stats.maxStreak, 0))}</span>}{snapshot.roundNumber !== undefined && <span>Round {asNumber(snapshot.roundNumber)}{snapshot.totalRounds ? `/${snapshot.totalRounds}` : ""}</span>}{snapshot.matchEndsAt && <span>Time {formatSeconds(matchRemainingMs)}</span>}</div></li>;
   })}</ol>{entries.length === 0 && <div className="rounded-sm border border-dashed border-white/15 p-5 text-center text-xs text-[var(--text-muted)]"><Users className="mx-auto mb-2" size={17} />Scores will appear once play begins.</div>}<p className="mt-4 border-t border-white/10 pt-3 text-[10px] leading-4 text-[var(--text-muted)]">{isSpectator ? "Read-only score and mode stats. No questions or answers are sent to spectators." : "Scores update after each shared reveal or as players progress through Score Race."}</p></aside>;
 }
 
