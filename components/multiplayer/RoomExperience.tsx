@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowLeft, ArrowUp, Check, Copy, Crown, LoaderCircle, LogOut, RotateCcw, Trophy, Users, UserX, Wifi, WifiOff } from "lucide-react";
 import type { Socket } from "socket.io-client";
@@ -15,6 +15,7 @@ import {
   readRoomCredential,
   roomAction,
   storeRoomCredential,
+  transferRoomHost,
   updateRoomSettings,
   type MultiplayerSnapshot,
   type StoredRoomCredential,
@@ -200,6 +201,7 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
   const [confirmLeaveMatch, setConfirmLeaveMatch] = useState(false);
   const [confirmHostLeaveRoom, setConfirmHostLeaveRoom] = useState(false);
   const [kickTarget, setKickTarget] = useState<{ actorId: string; nickname: string } | null>(null);
+  const [transferHostTarget, setTransferHostTarget] = useState<{ actorId: string; nickname: string } | null>(null);
   const [categories, setCategories] = useState<CategorySummary[]>([]);
   const [publicPlaysets, setPublicPlaysets] = useState<PublicPlaysetSummary[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
@@ -324,9 +326,19 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
         const actorId = asText(currentYou.actorId, myActorIdRef.current);
         const isNowHost = currentYou.role !== "SPECTATOR" && Boolean(actorId) && actorId === nextHostActorId;
         if (isNowHost) {
-          setHostNotice("You are now the host of this room. You can manage the room and start the rematch when the match ends.");
-        } else if (event.hostNickname) {
-          setMessage(`${event.hostNickname} is now the host of this room.`);
+          setHostNotice(
+            current.status === "LOBBY"
+              ? "You are now the host of this room. You can update match settings, manage players, and start the match."
+              : "You are now the host of this room. You can manage the room and start the rematch when the match ends.",
+          );
+        } else {
+          setHostNotice("");
+          setKickTarget(null);
+          setTransferHostTarget(null);
+          setConfirmHostLeaveRoom(false);
+          if (event.hostNickname) {
+            setMessage(`${event.hostNickname} is now the host of this room.`);
+          }
         }
         return {
           ...current,
@@ -465,12 +477,22 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
     if (wasHostRef.current === false && isHost) {
       queueMicrotask(() => {
         setHostNotice((current) =>
-          current || "You are now the host of this room. You can manage the room and start the rematch when the match ends.",
+          current ||
+          (status === "LOBBY"
+            ? "You are now the host of this room. You can update match settings, manage players, and start the match."
+            : "You are now the host of this room. You can manage the room and start the rematch when the match ends."),
         );
+      });
+    } else if (wasHostRef.current === true && !isHost) {
+      queueMicrotask(() => {
+        setHostNotice("");
+        setKickTarget(null);
+        setTransferHostTarget(null);
+        setConfirmHostLeaveRoom(false);
       });
     }
     wasHostRef.current = isHost;
-  }, [isHost, snapshot]);
+  }, [isHost, snapshot, status]);
   const playerCount = Array.isArray(snapshot?.players) ? snapshot.players.filter((player) => player.role !== "SPECTATOR").length : 0;
   const currentPlaysetId = asText(snapshot?.playsetId, "");
   const resolvedPlaysetTitle = useMemo(() => {
@@ -671,6 +693,23 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
     }
   }
 
+  async function confirmTransferHost() {
+    if (!credential || !transferHostTarget) return;
+    const target = transferHostTarget;
+    setBusy(true);
+    try {
+      const next = await transferRoomHost(credential, target.actorId);
+      applySnapshot(next);
+      setTransferHostTarget(null);
+      setHostNotice("");
+      setMessage(`Transferred host privileges to ${target.nickname}.`);
+    } catch (error) {
+      setMessage(readableError(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function answer(choice: "HIGHER" | "LOWER") {
     const socket = socketRef.current;
     if (!socket || !question.id || submitted || answering || isSpectator || phase !== "QUESTION") return;
@@ -835,19 +874,22 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
                 {playersForList.map((player) => {
                   const actorId = asText(player.actorId);
                   const nickname = asText(player.nickname, "Player");
-                  const canKick =
-                    isHost &&
-                    !isTrueSpectator &&
+                  const isPlayerRole = player.role !== "SPECTATOR";
+                  const isOtherParticipant =
                     Boolean(actorId) &&
                     actorId !== asText(you.actorId) &&
                     player.isHost !== true;
+                  const canKick = isHost && !isTrueSpectator && isOtherParticipant;
+                  const canTransferHost = isHost && !isTrueSpectator && isOtherParticipant && isPlayerRole;
                   return (
                     <PlayerRow
                       key={actorId}
                       player={player}
                       canKick={canKick}
+                      canTransferHost={canTransferHost}
                       disabled={busy}
                       onKick={() => setKickTarget({ actorId, nickname })}
+                      onTransferHost={() => setTransferHostTarget({ actorId, nickname })}
                     />
                   );
                 })}
@@ -973,6 +1015,12 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
         onCancel={() => setKickTarget(null)}
         onConfirm={() => void confirmKickPlayer()}
       />
+      <TransferHostConfirmDialog
+        target={transferHostTarget}
+        busy={busy}
+        onCancel={() => setTransferHostTarget(null)}
+        onConfirm={() => void confirmTransferHost()}
+      />
       <footer className="pb-2 text-center text-[10px] uppercase tracking-[0.12em] text-white/35">Higher or Lower · Party mode</footer>
     </main>
   );
@@ -981,18 +1029,22 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
 function PlayerRow({
   player,
   canKick = false,
+  canTransferHost = false,
   disabled = false,
   onKick,
+  onTransferHost,
 }: {
   player: Record<string, unknown>;
   canKick?: boolean;
+  canTransferHost?: boolean;
   disabled?: boolean;
   onKick?: () => void;
+  onTransferHost?: () => void;
 }) {
   const spectator = player.role === "SPECTATOR";
   const nickname = asText(player.nickname, "Player");
   return (
-    <div className="flex items-center justify-between gap-3 rounded-sm border border-white/10 bg-white/[0.025] px-3 py-3">
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-sm border border-white/10 bg-white/[0.025] px-3 py-3">
       <div className="flex min-w-0 items-center gap-3">
         <span className="grid size-8 shrink-0 place-items-center rounded-sm bg-white/10 text-xs font-bold text-[var(--accent-highlight)]">
           {asText(player.nickname, "?").slice(0, 1).toUpperCase()}
@@ -1007,6 +1059,18 @@ function PlayerRow({
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {player.isHost === true && <Crown size={15} className="text-[var(--accent-highlight)]" aria-label="Host" />}
+        {canTransferHost && onTransferHost && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={onTransferHost}
+            aria-label={`Make ${nickname} host`}
+            className="inline-flex min-h-8 items-center gap-1.5 rounded-sm border border-[var(--accent-highlight)]/45 bg-[var(--accent-highlight)]/10 px-2.5 text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--accent-highlight)] transition hover:bg-[var(--accent-highlight)] hover:text-[#15122b] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Crown size={12} aria-hidden="true" />
+            Make host
+          </button>
+        )}
         {canKick && onKick && (
           <button
             type="button"
@@ -1024,21 +1088,27 @@ function PlayerRow({
   );
 }
 
-function KickPlayerConfirmDialog({
-  target,
+/** Shared accessible native `<dialog>` confirmation modal with light-dismiss fallback. */
+function NativeConfirmDialog({
+  open,
+  eyebrow,
+  title,
+  description,
+  confirmButton,
   busy,
   onCancel,
-  onConfirm,
 }: {
-  target: { actorId: string; nickname: string } | null;
+  open: boolean;
+  eyebrow: string;
+  title: string;
+  description: string;
+  confirmButton: ReactNode;
   busy: boolean;
   onCancel: () => void;
-  onConfirm: () => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
-  const open = target !== null;
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -1100,12 +1170,12 @@ function KickPlayerConfirmDialog({
       {...({ closedby: "any" } as Record<string, string>)}
       className="m-auto w-[min(92vw,28rem)] rounded-md border border-amber-300/40 bg-[#1b1734] p-5 text-white shadow-[0_10px_0_var(--accent-classic)] backdrop:bg-black/75 backdrop:backdrop-blur-xs open:block sm:p-7"
     >
-      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-highlight)]">Host action</p>
+      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-highlight)]">{eyebrow}</p>
       <h1 id={titleId} className="mt-2 text-2xl font-bold text-white">
-        Kick {target?.nickname ?? "player"}?
+        {title}
       </h1>
       <p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">
-        They will be removed from the waiting room immediately and their room access will be revoked.
+        {description}
       </p>
       <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
         <button
@@ -1118,6 +1188,32 @@ function KickPlayerConfirmDialog({
         >
           Cancel
         </button>
+        {confirmButton}
+      </div>
+    </dialog>
+  );
+}
+
+function KickPlayerConfirmDialog({
+  target,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  target: { actorId: string; nickname: string } | null;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <NativeConfirmDialog
+      open={target !== null}
+      eyebrow="Host action"
+      title={`Kick ${target?.nickname ?? "player"}?`}
+      description="They will be removed from the waiting room immediately and their room access will be revoked."
+      busy={busy}
+      onCancel={onCancel}
+      confirmButton={
         <button
           type="button"
           disabled={busy}
@@ -1127,13 +1223,67 @@ function KickPlayerConfirmDialog({
           <UserX size={14} aria-hidden="true" />
           {busy ? "Removing…" : "Kick player"}
         </button>
-      </div>
-    </dialog>
+      }
+    />
+  );
+}
+
+function TransferHostConfirmDialog({
+  target,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  target: { actorId: string; nickname: string } | null;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <NativeConfirmDialog
+      open={target !== null}
+      eyebrow="Host action"
+      title={`Transfer host to ${target?.nickname ?? "player"}?`}
+      description="You will remain in the waiting room as a regular player, while they take over match settings, player management, and starting the match."
+      busy={busy}
+      onCancel={onCancel}
+      confirmButton={
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onConfirm}
+          className={BUTTON}
+        >
+          <Crown size={14} aria-hidden="true" />
+          {busy ? "Transferring…" : "Transfer host"}
+        </button>
+      }
+    />
   );
 }
 
 
 type RoomModeId = "PVP_SPEED" | "PVP_SCORE_RACE" | "PVP_SPEED_STREAK" | "PVP_SPEED_HP";
+type AnswerTimeSeconds = 3 | 5 | 10 | 15;
+const ROUND_COUNT_OPTIONS = [5, 7, 10, 15, 20, 30] as const;
+const ANSWER_TIME_OPTIONS: readonly AnswerTimeSeconds[] = [3, 5, 10, 15];
+const MATCH_MINUTE_OPTIONS = [1, 2, 3, 5, 10, 15] as const;
+
+function normalizeRoundCount(value: unknown, fallback = 5): number {
+  const parsed = typeof value === "number" && Number.isFinite(value) ? Math.round(value) : NaN;
+  return Number.isInteger(parsed) && parsed >= 5 && parsed <= 30 ? parsed : fallback;
+}
+
+function normalizeAnswerSeconds(msValue: unknown, fallback: AnswerTimeSeconds = 15): AnswerTimeSeconds {
+  const parsed = typeof msValue === "number" && Number.isFinite(msValue) ? Math.round(msValue / 1_000) : NaN;
+  return (ANSWER_TIME_OPTIONS as readonly number[]).includes(parsed) ? (parsed as AnswerTimeSeconds) : fallback;
+}
+
+function normalizeMatchMinutes(msValue: unknown, fallback = 5): number {
+  const parsed = typeof msValue === "number" && Number.isFinite(msValue) ? Math.round(msValue / 60_000) : NaN;
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 15 ? parsed : fallback;
+}
+
 const ROOM_MODE_OPTIONS: Array<{ id: RoomModeId; label: string }> = [
   { id: "PVP_SPEED", label: "Speed" },
   { id: "PVP_SCORE_RACE", label: "Score Race" },
@@ -1162,18 +1312,24 @@ function RoomSettingsEditor({
   const settings = object(snapshot.settings);
   const currentMode = asText(snapshot.mode, "PVP_SPEED") as RoomModeId;
   const currentPlayset = asText(snapshot.playsetId, "");
-  const currentRounds = asNumber(settings.roundCount, 5);
-  const currentSeconds = asNumber(Math.round(asNumber(settings.roundDurationMs, 15_000) / 1_000), 15);
-  const currentMinutes = asNumber(Math.round(asNumber(settings.matchDurationMs, 300_000) / 60_000), 5);
+  const currentRounds = normalizeRoundCount(settings.roundCount, 5);
+  const currentSeconds = normalizeAnswerSeconds(settings.roundDurationMs, 15);
+  const currentMinutes = normalizeMatchMinutes(settings.matchDurationMs, 5);
 
   const [mode, setMode] = useState<RoomModeId>(currentMode);
   const [playsetId, setPlaysetId] = useState(currentPlayset);
   const [rounds, setRounds] = useState(currentRounds);
-  const [seconds, setSeconds] = useState(currentSeconds);
+  const [seconds, setSeconds] = useState<AnswerTimeSeconds>(currentSeconds);
   const [minutes, setMinutes] = useState(currentMinutes);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
   const scoreRace = mode === "PVP_SCORE_RACE";
+  const roundOptions = ROUND_COUNT_OPTIONS.includes(rounds as (typeof ROUND_COUNT_OPTIONS)[number])
+    ? [...ROUND_COUNT_OPTIONS]
+    : [...ROUND_COUNT_OPTIONS, rounds].sort((a, b) => a - b);
+  const minuteOptions = MATCH_MINUTE_OPTIONS.includes(minutes as (typeof MATCH_MINUTE_OPTIONS)[number])
+    ? [...MATCH_MINUTE_OPTIONS]
+    : [...MATCH_MINUTE_OPTIONS, minutes].sort((a, b) => a - b);
 
   // Keep local controls synchronized only when the incoming room snapshot changes
   // externally (e.g., host transfer), without discarding unsaved local edits.
@@ -1210,7 +1366,12 @@ function RoomSettingsEditor({
       const next = await updateRoomSettings(credential, {
         mode,
         ...(playsetId && playsetId !== currentPlayset ? { playsetId } : {}),
-        ...(scoreRace ? { matchDurationMinutes: minutes } : { roundCount: rounds, answerTimeSeconds: seconds as 3 | 5 | 10 | 15 }),
+        ...(scoreRace
+          ? { matchDurationMinutes: normalizeMatchMinutes(minutes * 60_000) }
+          : {
+              roundCount: normalizeRoundCount(rounds),
+              answerTimeSeconds: normalizeAnswerSeconds(seconds * 1_000),
+            }),
       });
       onSaved(next);
       setNote("Saved.");
@@ -1240,20 +1401,20 @@ function RoomSettingsEditor({
       />
       {scoreRace ? (
         <label className="flex items-center justify-between gap-3 border-t border-white/10 pt-3">Match length
-          <select className="rounded-sm border border-white/20 bg-[#15122b] px-3 py-1.5 text-sm text-white" value={minutes} onChange={(event) => setMinutes(Number(event.target.value))}>
-            {[1, 2, 3, 5, 10, 15].map((value) => <option key={value} value={value}>{value} min</option>)}
+          <select className="rounded-sm border border-white/20 bg-[#15122b] px-3 py-1.5 text-sm text-white" value={minutes} onChange={(event) => setMinutes(normalizeMatchMinutes(Number(event.target.value) * 60_000))}>
+            {minuteOptions.map((value) => <option key={value} value={value}>{value} min</option>)}
           </select>
         </label>
       ) : (
         <>
           <label className="flex items-center justify-between gap-3 border-t border-white/10 pt-3">Rounds
-            <select className="rounded-sm border border-white/20 bg-[#15122b] px-3 py-1.5 text-sm text-white" value={rounds} onChange={(event) => setRounds(Number(event.target.value))}>
-              {[5, 7, 10, 15, 20, 30].map((value) => <option key={value} value={value}>{value}</option>)}
+            <select className="rounded-sm border border-white/20 bg-[#15122b] px-3 py-1.5 text-sm text-white" value={rounds} onChange={(event) => setRounds(normalizeRoundCount(Number(event.target.value)))}>
+              {roundOptions.map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
           </label>
           <label className="flex items-center justify-between gap-3">Answer time
-            <select className="rounded-sm border border-white/20 bg-[#15122b] px-3 py-1.5 text-sm text-white" value={seconds} onChange={(event) => setSeconds(Number(event.target.value))}>
-              {[3, 5, 10, 15].map((value) => <option key={value} value={value}>{value} sec</option>)}
+            <select className="rounded-sm border border-white/20 bg-[#15122b] px-3 py-1.5 text-sm text-white" value={seconds} onChange={(event) => setSeconds(normalizeAnswerSeconds(Number(event.target.value) * 1_000))}>
+              {ANSWER_TIME_OPTIONS.map((value) => <option key={value} value={value}>{value} sec</option>)}
             </select>
           </label>
         </>

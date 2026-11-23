@@ -201,6 +201,11 @@ export function kickRoomPlayer(credential: RoomCredential, actorId: string): Pro
   return roomRequest(credential, "/kick", "POST", { actorId });
 }
 
+/** Host-only manual transfer of host privileges to another player in the lobby. */
+export function transferRoomHost(credential: RoomCredential, actorId: string): Promise<MultiplayerSnapshot> {
+  return roomRequest(credential, "/transfer-host", "POST", { actorId });
+}
+
 export async function createSpectatorCredential(code: string, nickname: string): Promise<{ sessionId: string; roomCode: string; gameToken: string; state: MultiplayerSnapshot }> {
   const response = await fetch("/api/backend/rooms/spectate", {
     method: "POST",
