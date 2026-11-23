@@ -8,8 +8,11 @@ import {
   BackendApiError,
   createRoom,
   fetchCategories,
+  fetchPublicPlayset,
+  fetchPublicPlaysets,
   joinRoom,
   type CategorySummary,
+  type PublicPlaysetSummary,
   type RoomCredentialResponse,
   type RoomMode,
 } from "@/lib/backend";
@@ -30,6 +33,9 @@ export default function MultiplayerLobby() {
   const [roomCode, setRoomCode] = useState("");
   const [mode, setMode] = useState<RoomMode>("PVP_SPEED");
   const [categories, setCategories] = useState<CategorySummary[]>([]);
+  const [customPlaysets, setCustomPlaysets] = useState<PublicPlaysetSummary[]>([]);
+  const [customPlaysetId, setCustomPlaysetId] = useState("");
+  const [customPlaysetStatus, setCustomPlaysetStatus] = useState("");
   const [playsetId, setPlaysetId] = useState("");
   const [status, setStatus] = useState("");
   const [copied, setCopied] = useState(false);
@@ -48,22 +54,59 @@ export default function MultiplayerLobby() {
 
   useEffect(() => {
     const saved = readRoomCredential();
-    setRecentRoom(Boolean(saved));
+    Promise.resolve().then(() => setRecentRoom(Boolean(saved)));
     const controller = new AbortController();
-    fetchCategories({ signal: controller.signal })
-      .then((page) => {
-        const available = page.categories.filter(
+    Promise.allSettled([
+      fetchCategories({ signal: controller.signal }),
+      fetchPublicPlaysets({ limit: 50, signal: controller.signal }),
+    ]).then(([categoryResult, playsetResult]) => {
+      if (categoryResult.status === "fulfilled") {
+        const available = categoryResult.value.categories.filter(
           (category) => category.playable && category.playsetId,
         );
-        setCategories(page.categories);
+        setCategories(categoryResult.value.categories);
         setPlaysetId((current) => current || available[0]?.playsetId || "");
-      })
-      .catch(() => setStatus("The game service is waking up. Try again in a moment."));
+      }
+      if (playsetResult.status === "fulfilled") setCustomPlaysets(playsetResult.value.playsets);
+      if (categoryResult.status === "rejected" && playsetResult.status === "rejected") {
+        setStatus("The game service is waking up. Try again in a moment.");
+      }
+    });
     return () => controller.abort();
   }, []);
 
   function reportError(error: unknown) {
     setStatus(error instanceof BackendApiError ? error.message : "Something went wrong. Please try again.");
+  }
+
+  async function loadUnlistedPlayset() {
+    const id = customPlaysetId.trim();
+    if (!id) {
+      setCustomPlaysetStatus("Enter the playset ID from its shared link.");
+      return;
+    }
+    setBusy(true);
+    setCustomPlaysetStatus("");
+    try {
+      const playset = await fetchPublicPlayset(id);
+      setCustomPlaysets((current) => current.some((item) => item.id === playset.id)
+        ? current
+        : [...current, {
+            id: playset.id,
+            title: playset.title,
+            description: playset.description,
+            metricName: playset.metricName,
+            metricUnit: playset.metricUnit,
+            itemCount: playset.itemCount,
+            revision: playset.revision,
+          }]);
+      setPlaysetId(playset.id);
+      setCustomPlaysetStatus(`Selected “${playset.title}” (${playset.itemCount} items).`);
+    } catch (error) {
+      setCustomPlaysetStatus(error instanceof Error ? error.message : "That published set could not be loaded.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handleCreate() {
@@ -181,24 +224,41 @@ export default function MultiplayerLobby() {
             </label>
 
             <label className="mb-5 block text-xs font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-              Category
+              Category or published playset
               <select
                 className={`${inputClass} mt-2`}
                 value={playsetId}
                 onChange={(event) => setPlaysetId(event.target.value)}
-                disabled={busy || playableCategories.length === 0}
+                disabled={busy || (playableCategories.length === 0 && customPlaysets.length === 0)}
               >
-                {playableCategories.length === 0 ? (
+                {playableCategories.length === 0 && customPlaysets.length === 0 ? (
                   <option value="">Loading available categories…</option>
                 ) : (
-                  playableCategories.map((category) => (
-                    <option key={category.playsetId} value={category.playsetId ?? ""}>
-                      {category.title}
-                    </option>
-                  ))
+                  <>
+                    {playableCategories.length > 0 && <optgroup label="Built-in categories">
+                      {playableCategories.map((category) => (
+                        <option key={category.playsetId} value={category.playsetId ?? ""}>{category.title}</option>
+                      ))}
+                    </optgroup>}
+                    {customPlaysets.length > 0 && <optgroup label="Public custom playsets">
+                      {customPlaysets.map((playset) => (
+                        <option key={playset.id} value={playset.id}>{playset.title} · {playset.itemCount} items</option>
+                      ))}
+                    </optgroup>}
+                  </>
                 )}
               </select>
             </label>
+
+            <details className="mb-5 rounded-sm border border-white/15 bg-white/[0.02] px-4 py-3">
+              <summary className="cursor-pointer text-xs font-bold uppercase tracking-[0.1em] text-[var(--text-secondary)]">Use an unlisted set</summary>
+              <p className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">Paste the playset ID from an unlisted set’s shared link. The set must be published and playable.</p>
+              <div className="mt-3 flex gap-2">
+                <input className={inputClass} aria-label="Unlisted playset ID" value={customPlaysetId} onChange={(event) => setCustomPlaysetId(event.target.value)} placeholder="Playset ID" />
+                <button type="button" className="shrink-0 rounded-sm border border-white/30 px-3 text-[10px] font-bold uppercase text-white hover:bg-white/10 disabled:opacity-50" disabled={busy} onClick={() => void loadUnlistedPlayset()}>Load</button>
+              </div>
+              {customPlaysetStatus && <p role="status" className="mt-2 text-[11px] text-[var(--accent-highlight)]">{customPlaysetStatus}</p>}
+            </details>
 
             <fieldset className="mb-5">
               <legend className="mb-2 text-xs font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Game mode</legend>
