@@ -14,11 +14,13 @@ import {
   readRoomCredential,
   roomAction,
   storeRoomCredential,
+  updateRoomSettings,
   type MultiplayerSnapshot,
   type StoredRoomCredential,
 } from "@/lib/backend/multiplayer";
 import { emitAtmosphere } from "@/lib/atmosphere/eventBus";
 import { originFor } from "@/lib/atmosphere/delegation";
+import { fetchPublicPlaysets } from "@/lib/backend/client";
 
 type Ack = { ok?: boolean; error?: { code?: string; message?: string }; submitted?: boolean };
 const CARD = "rounded-md border border-white/20 bg-[#1b1734]/90 p-5 shadow-[0_8px_0_var(--accent-classic)] sm:p-7";
@@ -334,7 +336,7 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
               <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4"><p className="text-xs leading-5 text-[var(--text-muted)]">Share room code <strong className="tracking-[0.2em] text-white">{snapshot.roomCode || credential.roomCode}</strong> with players joining this match.</p><button type="button" className={OUTLINE} onClick={() => void copyRoomCode()}><Copy size={14} />{copiedCode ? "Copied" : "Copy code"}</button></div>
             </section>
             <section className={`${CARD} flex flex-col justify-between`}>
-              <div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-time-attack)]">Match settings</p><h2 className="mt-1 text-2xl font-bold">{modeLabel(mode)}</h2><SettingsSummary snapshot={snapshot} /></div>
+              <div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-time-attack)]">Match settings</p><h2 className="mt-1 text-2xl font-bold">{modeLabel(mode)}</h2><SettingsSummary snapshot={snapshot} />{isHost && <RoomSettingsEditor snapshot={snapshot} credential={credential} onSaved={(next) => { setSnapshot(next); setMessage("Room settings updated."); }} />}</div>
               <div className="mt-8">
                 {isHost ? <button className={`${BUTTON} w-full`} type="button" disabled={busy || playerCount < 2} onClick={() => void startRoom()}>{busy ? "Starting…" : playerCount < 2 ? "Waiting for another player" : "Start match"}</button> : <p className="rounded-sm border border-white/15 bg-white/[0.03] px-4 py-3 text-center text-xs text-[var(--text-secondary)]">Waiting for the host to start the match…</p>}
                 {isHost && playerCount < 2 && <p className="mt-3 text-center text-[10px] text-[var(--text-muted)]">At least two players are needed to start.</p>}
@@ -383,6 +385,99 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
 function PlayerRow({ player }: { player: Record<string, unknown> }) {
   const spectator = player.role === "SPECTATOR";
   return <div className="flex items-center justify-between gap-3 rounded-sm border border-white/10 bg-white/[0.025] px-3 py-3"><div className="flex min-w-0 items-center gap-3"><span className="grid size-8 shrink-0 place-items-center rounded-sm bg-white/10 text-xs font-bold text-[var(--accent-highlight)]">{asText(player.nickname, "?").slice(0, 1).toUpperCase()}</span><div className="min-w-0"><p className="truncate text-sm font-bold text-white">{asText(player.nickname, "Player")}</p><p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">{spectator ? "Spectator" : player.isHost === true ? "Host" : "Player"}</p></div></div>{player.isHost === true && <Crown size={15} className="text-[var(--accent-highlight)]" aria-label="Host" />}</div>;
+}
+
+
+type RoomModeId = "PVP_SPEED" | "PVP_SCORE_RACE" | "PVP_SPEED_STREAK" | "PVP_SPEED_HP";
+const ROOM_MODE_OPTIONS: Array<{ id: RoomModeId; label: string }> = [
+  { id: "PVP_SPEED", label: "Speed" },
+  { id: "PVP_SCORE_RACE", label: "Score Race" },
+  { id: "PVP_SPEED_STREAK", label: "Streak" },
+  { id: "PVP_SPEED_HP", label: "HP" },
+];
+
+/** Host-only lobby controls; the backend rejects edits once the match starts. */
+function RoomSettingsEditor({ snapshot, credential, onSaved }: { snapshot: MultiplayerSnapshot; credential: StoredRoomCredential | null; onSaved: (next: MultiplayerSnapshot) => void }) {
+  const settings = object(snapshot.settings);
+  const currentMode = asText(snapshot.mode, "PVP_SPEED") as RoomModeId;
+  const currentPlayset = asText((snapshot as unknown as Record<string, unknown>).playsetId, "");
+  const [mode, setMode] = useState<RoomModeId>(currentMode);
+  const [playsetId, setPlaysetId] = useState(currentPlayset);
+  const [rounds, setRounds] = useState(asNumber(settings.roundCount, 5));
+  const [seconds, setSeconds] = useState(asNumber(Math.round(asNumber(settings.roundDurationMs, 15_000) / 1_000), 15));
+  const [minutes, setMinutes] = useState(asNumber(Math.round(asNumber(settings.matchDurationMs, 300_000) / 60_000), 5));
+  const [playsets, setPlaysets] = useState<Array<{ id: string; title: string }>>([]);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+  const scoreRace = mode === "PVP_SCORE_RACE";
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchPublicPlaysets({ limit: 50 })
+      .then((page) => { if (!cancelled) setPlaysets(page.playsets.map((playset) => ({ id: playset.id, title: playset.title }))); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
+
+  async function save() {
+    if (!credential) return;
+    setBusy(true);
+    setNote("");
+    try {
+      const next = await updateRoomSettings(credential, {
+        mode,
+        ...(playsetId && playsetId !== currentPlayset ? { playsetId } : {}),
+        ...(scoreRace ? { matchDurationMinutes: minutes } : { roundCount: rounds, answerTimeSeconds: seconds as 3 | 5 | 10 | 15 }),
+      });
+      onSaved(next);
+      setNote("Saved.");
+    } catch (error) {
+      setNote(error instanceof Error ? error.message : "Could not save room settings.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-5 space-y-3 border-t border-white/10 pt-4 text-xs text-[var(--text-secondary)]">
+      <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-highlight)]">Host controls</p>
+      <div className="flex flex-wrap gap-2">
+        {ROOM_MODE_OPTIONS.map((option) => (
+          <button key={option.id} type="button" onClick={() => setMode(option.id)} className={`min-h-9 rounded-sm border px-3 text-[11px] font-bold uppercase tracking-[0.1em] ${mode === option.id ? "border-[var(--accent-highlight)] bg-[var(--accent-highlight)]/15 text-white" : "border-white/20 text-[var(--text-secondary)] hover:border-white/40"}`}>{option.label}</button>
+        ))}
+      </div>
+      <label className="block">Category / playset
+        <select className="mt-1.5 w-full rounded-sm border border-white/20 bg-[#15122b] px-3 py-2 text-sm text-white" value={playsetId} onChange={(event) => setPlaysetId(event.target.value)}>
+          {playsetId === "" && <option value="">Current selection</option>}
+          {playsets.map((playset) => <option key={playset.id} value={playset.id}>{playset.title}</option>)}
+        </select>
+      </label>
+      {scoreRace ? (
+        <label className="flex items-center justify-between gap-3 border-t border-white/10 pt-3">Match length
+          <select className="rounded-sm border border-white/20 bg-[#15122b] px-3 py-1.5 text-sm text-white" value={minutes} onChange={(event) => setMinutes(Number(event.target.value))}>
+            {[1, 2, 3, 5, 10, 15].map((value) => <option key={value} value={value}>{value} min</option>)}
+          </select>
+        </label>
+      ) : (
+        <>
+          <label className="flex items-center justify-between gap-3 border-t border-white/10 pt-3">Rounds
+            <select className="rounded-sm border border-white/20 bg-[#15122b] px-3 py-1.5 text-sm text-white" value={rounds} onChange={(event) => setRounds(Number(event.target.value))}>
+              {[5, 7, 10, 15, 20, 30].map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
+          </label>
+          <label className="flex items-center justify-between gap-3">Answer time
+            <select className="rounded-sm border border-white/20 bg-[#15122b] px-3 py-1.5 text-sm text-white" value={seconds} onChange={(event) => setSeconds(Number(event.target.value))}>
+              {[3, 5, 10, 15].map((value) => <option key={value} value={value}>{value} sec</option>)}
+            </select>
+          </label>
+        </>
+      )}
+      <div className="flex items-center gap-3">
+        <button type="button" disabled={busy} onClick={() => void save()} className={`${BUTTON} min-h-9 px-3 text-[11px]`}>{busy ? "Saving…" : "Apply settings"}</button>
+        {note && <span aria-live="polite" className="text-[11px] text-[var(--accent-highlight)]">{note}</span>}
+      </div>
+    </div>
+  );
 }
 
 function SettingsSummary({ snapshot }: { snapshot: MultiplayerSnapshot }) {

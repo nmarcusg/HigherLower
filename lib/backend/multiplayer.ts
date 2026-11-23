@@ -119,7 +119,7 @@ export function clearRoomCredential(sessionId: string): void {
 async function roomRequest<T>(
   credential: RoomCredential,
   suffix: string,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH",
   body?: unknown,
 ): Promise<T> {
   const response = await fetch(`/api/backend/rooms/${encodeURIComponent(credential.sessionId)}${suffix}`, {
@@ -155,6 +155,19 @@ export function getRoomResults(credential: RoomCredential): Promise<Record<strin
 
 export function roomAction<T = MultiplayerSnapshot>(credential: RoomCredential, action: "start" | "leave" | "rematch" | "end"): Promise<T> {
   return roomRequest(credential, `/${action}`, "POST");
+}
+
+export interface RoomSettingsPatch {
+  mode?: "PVP_SPEED" | "PVP_SCORE_RACE" | "PVP_SPEED_STREAK" | "PVP_SPEED_HP";
+  playsetId?: string;
+  roundCount?: number;
+  answerTimeSeconds?: 3 | 5 | 10 | 15;
+  matchDurationMinutes?: number;
+}
+
+/** Host-only edits while the room is still a lobby. */
+export function updateRoomSettings(credential: RoomCredential, patch: RoomSettingsPatch): Promise<MultiplayerSnapshot> {
+  return roomRequest(credential, "/settings", "PATCH", patch);
 }
 
 export async function createSpectatorCredential(code: string, nickname: string): Promise<{ sessionId: string; roomCode: string; gameToken: string; state: MultiplayerSnapshot }> {
