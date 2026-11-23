@@ -43,6 +43,7 @@ export interface MultiplayerSnapshot {
 export interface StoredRoomCredential extends RoomCredential {
   nickname?: string;
   entry?: "create" | "join" | "spectate";
+  state?: MultiplayerSnapshot;
 }
 
 const STORAGE_KEY = "higher-lower:room-credential:v1";
@@ -67,6 +68,9 @@ export function readRoomCredential(): StoredRoomCredential | null {
       gameToken: parsed.gameToken,
       nickname: typeof parsed.nickname === "string" ? parsed.nickname : undefined,
       entry: parsed.entry === "create" || parsed.entry === "join" || parsed.entry === "spectate" ? parsed.entry : undefined,
+      state: isObject(parsed.state) && parsed.state.sessionId === parsed.sessionId
+        ? parsed.state as unknown as MultiplayerSnapshot
+        : undefined,
     };
   } catch {
     return null;

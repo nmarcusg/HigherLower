@@ -23,6 +23,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { GameItem } from "@/types/api";
 import type { SemanticCategoryId } from "@/types/game";
@@ -95,6 +96,7 @@ export default function ClassicGame({
   categoryId,
   categoryLabel,
 }: ClassicGameProps) {
+  const router = useRouter();
   const [deck, setDeck] = useState<GameItem[]>(() => buildDeck(initialPool));
   // IDs consumed during the current cycle. Reset when a new cycle begins.
   const [seenIds, setSeenIds] = useState<Set<string | number>>(() => new Set());
@@ -106,6 +108,7 @@ export default function ClassicGame({
   const [score, setScore] = useState(0);
   const [tint, setTint] = useState<ResultTint>(null);
   const [lastCorrect, setLastCorrect] = useState<boolean | null>(null);
+  const [confirmAbort, setConfirmAbort] = useState(false);
 
   // The handoff plays on every deck swap but never on the first paint. The
   // opening item is captured in state once, so the flag is already correct in
@@ -318,6 +321,7 @@ export default function ClassicGame({
     <GameplayShell
       mode="classic"
       title={`${categoryLabel} · Classic`}
+      onBack={phase !== "game-over" ? () => setConfirmAbort(true) : undefined}
       status={
         <GameplayEntranceStatus>
           <div className="flex items-center gap-11">
@@ -446,6 +450,15 @@ export default function ClassicGame({
                 Back to setup
               </Link>
             </div>
+          </div>
+        </div>
+      )}
+      {confirmAbort && phase !== "game-over" && (
+        <div role="dialog" aria-modal="true" aria-labelledby="classic-abort-title" className="absolute inset-0 z-[60] flex items-center justify-center bg-[#15122b]/90 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md border-2 border-white bg-[var(--surface-raised)] p-7 text-center shadow-[8px_8px_0_var(--accent-classic)]">
+            <h2 id="classic-abort-title" className="text-2xl font-bold uppercase">Abort this game?</h2>
+            <p className="mt-3 text-sm text-[var(--foreground-muted)]">Your current run and score will be lost.</p>
+            <div className="mt-6 flex gap-3"><button autoFocus className="min-h-11 flex-1 border-2 border-white px-4 text-xs font-bold uppercase" onClick={() => setConfirmAbort(false)}>Keep playing</button><button className="min-h-11 flex-1 bg-[var(--status-error)] px-4 text-xs font-bold uppercase text-white" onClick={() => router.push("/")}>Abort game</button></div>
           </div>
         </div>
       )}

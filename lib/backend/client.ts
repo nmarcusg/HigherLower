@@ -101,7 +101,7 @@ function parseRoomCredential(value: unknown): RoomCredentialResponse {
 function isSoloPublicItem(value: unknown): boolean {
   return isRecord(value) && isString(value.id) && isString(value.name) &&
     isNullableString(value.imageUrl) &&
-    (value.attribution === undefined || isString(value.attribution)) &&
+    (value.attribution === undefined || isNullableString(value.attribution)) &&
     (value.displayValue === undefined || isString(value.displayValue));
 }
 

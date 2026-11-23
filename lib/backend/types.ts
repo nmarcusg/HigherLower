@@ -42,7 +42,7 @@ export interface SoloPublicItem {
   id: string;
   name: string;
   imageUrl: string | null;
-  attribution?: string;
+  attribution?: string | null;
   displayValue?: string;
 }
 

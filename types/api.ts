@@ -20,7 +20,7 @@ export interface GameItem {
    * images that are public domain / CC0 or whose source requires no credit.
    * This is a truthful licensing surface, not a gameplay metric.
    */
-  attribution?: string;
+  attribution?: string | null;
 }
 
 // ─── Typed fetch error ───────────────────────────────────────────────────────

@@ -28,6 +28,8 @@ export interface CreatorPlayset {
   items?: CreatorItem[];
 }
 
+export type CreatorPlaysetSummary = Omit<CreatorPlayset, "items">;
+
 export interface CreatorItemInput {
   id?: string;
   name: string;
@@ -81,7 +83,7 @@ async function creatorRequest<T>(token: string, path = "", method: "GET" | "POST
   return payload as T;
 }
 
-export function listCreatorPlaysets(token: string): Promise<{ total: number; limit: number; offset: number; playsets: CreatorPlayset[] }> {
+export function listCreatorPlaysets(token: string): Promise<{ total: number; limit: number; offset: number; playsets: CreatorPlaysetSummary[] }> {
   return creatorRequest(token, "?limit=50");
 }
 
@@ -99,4 +101,8 @@ export function updateCreatorPlayset(token: string, id: string, input: CreatorPl
 
 export function creatorPlaysetAction(token: string, id: string, action: "publish" | "unpublish" | "archive", expectedRevision: number): Promise<CreatorPlayset> {
   return creatorRequest(token, `/${encodeURIComponent(id)}/${action}`, "POST", { expectedRevision });
+}
+
+export function archiveCreatorPlayset(token: string, id: string, expectedRevision: number): Promise<CreatorPlayset> {
+  return creatorPlaysetAction(token, id, "archive", expectedRevision);
 }

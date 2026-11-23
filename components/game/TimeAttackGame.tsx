@@ -27,6 +27,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, Timer } from "lucide-react";
 import { GameItem } from "@/types/api";
 import type { SemanticCategoryId } from "@/types/game";
@@ -108,6 +109,7 @@ export default function TimeAttackGame({
   categoryId,
   categoryLabel,
 }: TimeAttackGameProps) {
+  const router = useRouter();
   // ── Deck ───────────────────────────────────────────────────────────────────
   const [deck, setDeck] = useState<GameItem[]>(() => buildDeck(initialPool));
   // IDs consumed during this session. Persists for the whole timed run.
@@ -121,6 +123,7 @@ export default function TimeAttackGame({
   const [score, setScore] = useState(0);
   const [tint, setTint] = useState<ResultTint>(null);
   const [shaking, setShaking] = useState(false);
+  const [confirmAbort, setConfirmAbort] = useState(false);
   const gameOverActionRef = useRef<HTMLButtonElement>(null);
   const gameOverDialogRef = useRef<HTMLDivElement>(null);
   const gameOverOriginRef = useRef<HTMLElement | null>(null);
@@ -215,6 +218,15 @@ export default function TimeAttackGame({
   useEffect(() => {
     phaseRef.current = phase;
   }, [phase]);
+
+  useEffect(() => {
+    if (confirmAbort) {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      intervalRef.current = null;
+      return;
+    }
+    if (phase === "playing" && !intervalRef.current) startTimer();
+  }, [confirmAbort, phase]);
 
   useEffect(() => {
     if (phase === "game-over") {
@@ -426,6 +438,7 @@ export default function TimeAttackGame({
       mode="time-attack"
       title={`${categoryLabel} · Time Attack`}
       subtitle="Race the clock"
+      onBack={phase !== "game-over" ? () => setConfirmAbort(true) : undefined}
       status={
         <GameplayEntranceStatus>
           <div className="flex items-center gap-11">
@@ -598,6 +611,15 @@ export default function TimeAttackGame({
                 Back to setup
               </Link>
             </div>
+          </div>
+        </div>
+      )}
+      {confirmAbort && phase !== "game-over" && (
+        <div role="dialog" aria-modal="true" aria-labelledby="time-attack-abort-title" className="absolute inset-0 z-[60] flex items-center justify-center bg-[#15122b]/90 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md border-2 border-white bg-[var(--surface-raised)] p-7 text-center shadow-[8px_8px_0_var(--accent-time-attack)]">
+            <h2 id="time-attack-abort-title" className="text-2xl font-bold uppercase">Abort this game?</h2>
+            <p className="mt-3 text-sm text-[var(--foreground-muted)]">Your current run and score will be lost.</p>
+            <div className="mt-6 flex gap-3"><button autoFocus className="min-h-11 flex-1 border-2 border-white px-4 text-xs font-bold uppercase" onClick={() => setConfirmAbort(false)}>Keep playing</button><button className="min-h-11 flex-1 bg-[var(--status-error)] px-4 text-xs font-bold uppercase text-white" onClick={() => router.push("/")}>Abort game</button></div>
           </div>
         </div>
       )}

@@ -16,7 +16,7 @@ import {
   type RoomCredentialResponse,
   type RoomMode,
 } from "@/lib/backend";
-import { createSpectatorCredential, readRoomCredential, storeRoomCredential } from "@/lib/backend/multiplayer";
+import { createSpectatorCredential, readRoomCredential, storeRoomCredential, type MultiplayerSnapshot } from "@/lib/backend/multiplayer";
 
 const ROOM_MODES: ReadonlyArray<{ id: RoomMode; label: string; description: string }> = [
   { id: "PVP_SPEED", label: "Speed", description: "Shared rounds. Fastest correct answer wins." },
@@ -126,7 +126,7 @@ export default function MultiplayerLobby() {
         mode,
         ...(mode === "PVP_SCORE_RACE" ? { matchDurationMinutes } : { roundCount, answerTimeSeconds }),
       });
-      storeRoomCredential({ ...credential, nickname, entry: "create" });
+      storeRoomCredential({ ...credential, state: credential.state as unknown as MultiplayerSnapshot, nickname, entry: "create" });
       setRoom({
         ...credential,
         state: credential.state as Record<string, unknown>,
@@ -150,7 +150,7 @@ export default function MultiplayerLobby() {
       const credential = joinAsSpectator
         ? await createSpectatorCredential(roomCode, nickname)
         : await joinRoom({ code: roomCode, nickname });
-      storeRoomCredential({ ...credential, nickname, entry: joinAsSpectator ? "spectate" : "join" });
+      storeRoomCredential({ ...credential, state: credential.state as unknown as MultiplayerSnapshot, nickname, entry: joinAsSpectator ? "spectate" : "join" });
       setRoom({
         ...credential,
         state: credential.state as Record<string, unknown>,

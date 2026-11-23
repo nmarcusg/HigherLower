@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, LoaderCircle, TriangleAlert } from "lucide-react";
 import GameCard from "@/components/game/GameCard";
 import GameplayShell, { type GameplayMode } from "@/components/game/GameplayShell";
@@ -59,7 +60,7 @@ function toGameItem(item: SoloSessionState["left"]): GameItem | null {
     imageUrl: item.imageUrl ?? "",
     value: 0,
     displayValue: item.displayValue ?? "",
-    attribution: item.attribution,
+    attribution: item.attribution ?? undefined,
   };
 }
 
@@ -77,6 +78,7 @@ function isIgnoredKeyTarget(event: KeyboardEvent): boolean {
 }
 
 export default function BackendSoloGame({ playsetId, categoryLabel, mode }: BackendSoloGameProps) {
+  const router = useRouter();
   const apiMode: SoloMode = mode === "time-attack" ? "TIME_ATTACK" : "CLASSIC";
   const storageKey = useMemo(() => `higher-lower:solo:v1:${apiMode}:${playsetId}`, [apiMode, playsetId]);
   const [state, setState] = useState<SoloSessionState | null>(null);
@@ -228,14 +230,14 @@ export default function BackendSoloGame({ playsetId, categoryLabel, mode }: Back
     if (!error) setError("The next question is taking longer than expected. Retry to reconnect.");
   }, [applyState, credential, error]);
 
-  const submitAnswer = useCallback(async (choice: SoloChoice) => {
+  const submitAnswer = useCallback(async (choice: SoloChoice, source: "pointer" | "keyboard" = "pointer") => {
     if (!credential || !state?.questionId || state.phase !== "AWAITING_ANSWER" || answerLocked.current) return;
     answerLocked.current = true;
     setBusy(true);
     setError(null);
     const id = requestId();
     const input = { sessionId: credential.sessionId, gameToken: credential.gameToken, questionId: state.questionId, choice, requestId: id };
-    emitAtmosphere({ type: "guess", direction: choice === "HIGHER" ? "higher" : "lower", source: "keyboard", ...originFor(document.activeElement, ".gameplay-entrance-controls") });
+    emitAtmosphere({ type: "guess", direction: choice === "HIGHER" ? "higher" : "lower", source, ...originFor(document.activeElement, ".gameplay-entrance-controls") });
     try {
       let receipt: SoloAnswerReceipt;
       try {
@@ -355,10 +357,10 @@ export default function BackendSoloGame({ playsetId, categoryLabel, mode }: Back
       if (isIgnoredKeyTarget(event) || busy || phase !== "playing") return;
       if (event.key === "ArrowUp" || event.key.toLowerCase() === "h") {
         event.preventDefault();
-        void submitAnswer("HIGHER");
+        void submitAnswer("HIGHER", "keyboard");
       } else if (event.key === "ArrowDown" || event.key.toLowerCase() === "l") {
         event.preventDefault();
-        void submitAnswer("LOWER");
+        void submitAnswer("LOWER", "keyboard");
       }
     }
     window.addEventListener("keydown", onKey);
@@ -371,8 +373,8 @@ export default function BackendSoloGame({ playsetId, categoryLabel, mode }: Back
       try { await endSoloSession(credential.sessionId, credential.gameToken); } catch { /* local exit remains available */ }
     }
     sessionStorage.removeItem(storageKey);
-    window.location.assign(backHref);
-  }, [credential, state?.status, storageKey]);
+    router.replace(backHref);
+  }, [backHref, credential, router, state?.status, storageKey]);
   if (phase === "loading") {
     return (
       <GameplayShell mode={mode} title={`${categoryLabel} · ${modeTitle}`}>
