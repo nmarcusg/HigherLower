@@ -3,7 +3,7 @@
 import type { PlayableModeId } from "@/lib/catalog/semanticCatalog";
 
 export interface SelectableMode {
-  readonly id: PlayableModeId | "pvp";
+  readonly id: PlayableModeId;
   readonly label: string;
   readonly description: string;
   readonly comingSoon?: boolean;
@@ -22,9 +22,6 @@ const MODE_CONTENT = {
   },
   "time-attack": {
     description: "Race the clock. Every right answer buys more time.",
-  },
-  pvp: {
-    description: "Player-versus-player mode is not available yet.",
   },
 } as const;
 
