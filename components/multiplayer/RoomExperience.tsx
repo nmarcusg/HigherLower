@@ -2,15 +2,16 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowLeft, ArrowUp, Check, Copy, Crown, LoaderCircle, LogOut, RotateCcw, Trophy, Users, Wifi, WifiOff } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Check, Copy, Crown, LoaderCircle, LogOut, RotateCcw, Trophy, Users, UserX, Wifi, WifiOff } from "lucide-react";
 import type { Socket } from "socket.io-client";
 import {
   clearRoomCredential,
   connectRoom,
   getRoomResults,
   getRoomState,
+  kickRoomPlayer,
   readRoomCredential,
   roomAction,
   storeRoomCredential,
@@ -20,7 +21,13 @@ import {
 } from "@/lib/backend/multiplayer";
 import { emitAtmosphere } from "@/lib/atmosphere/eventBus";
 import { originFor } from "@/lib/atmosphere/delegation";
-import { fetchPublicPlaysets } from "@/lib/backend/client";
+import { fetchCategories, fetchPublicPlayset, fetchPublicPlaysets } from "@/lib/backend/client";
+import type { CategorySummary, PublicPlaysetSummary } from "@/lib/backend";
+import {
+  PlaysetPickerField,
+  buildPlaysetPickerOptions,
+  type PlaysetPickerOption,
+} from "@/components/multiplayer/PlaysetPickerModal";
 
 type Ack = { ok?: boolean; error?: { code?: string; message?: string }; submitted?: boolean };
 const CARD = "rounded-md border border-white/20 bg-[#1b1734]/90 p-5 shadow-[0_8px_0_var(--accent-classic)] sm:p-7";
@@ -32,6 +39,16 @@ function asNumber(value: unknown, fallback = 0): number { return typeof value ==
 function object(value: unknown): Record<string, unknown> { return typeof value === "object" && value !== null ? value as Record<string, unknown> : {}; }
 function readableError(error: unknown): string { return error instanceof Error ? error.message : "The room could not be reached. Reconnecting…"; }
 function formatSeconds(milliseconds: number): string { return `${Math.max(0, Math.ceil(milliseconds / 1000))}s`; }
+function formatFallbackPlaysetId(id: string): string {
+  if (!id) return "";
+  const cleaned = id.replace(/^system-/, "").trim();
+  if (!cleaned) return id;
+  return cleaned
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
 
 const LIVE_ENGINE_PHASES = new Set(["COUNTDOWN", "QUESTION", "REVEAL", "FINISHED"]);
 const OPTIMIZABLE_IMAGE_HOSTS = new Set([
@@ -73,6 +90,8 @@ function mergeRoomSnapshot(
 
   const preservedRoomCode = incoming.roomCode || current.roomCode;
   const preservedSettings = incoming.settings ?? current.settings;
+  const preservedPlaysetId = incoming.playsetId || current.playsetId;
+  const preservedPlaysetTitle = incoming.playsetTitle ?? current.playsetTitle;
 
   // Terminal states always win, preserving room metadata for post-match actions.
   if (incoming.status === "CANCELLED" || incoming.status === "FINISHED") {
@@ -80,6 +99,8 @@ function mergeRoomSnapshot(
       ...incoming,
       roomCode: preservedRoomCode,
       settings: preservedSettings,
+      playsetId: preservedPlaysetId,
+      playsetTitle: preservedPlaysetTitle,
       hostActorId: incoming.hostActorId || current.hostActorId,
       you: incoming.you ? { ...current.you, ...incoming.you } : current.you,
     };
@@ -105,6 +126,8 @@ function mergeRoomSnapshot(
       ...current,
       roomCode: preservedRoomCode,
       settings: preservedSettings,
+      playsetId: preservedPlaysetId,
+      playsetTitle: preservedPlaysetTitle,
       hostActorId: nextHostActorId,
       you: current.you
         ? {
@@ -134,6 +157,8 @@ function mergeRoomSnapshot(
     ...incoming,
     roomCode: preservedRoomCode,
     settings: preservedSettings,
+    playsetId: preservedPlaysetId,
+    playsetTitle: preservedPlaysetTitle,
     hostActorId: incoming.hostActorId || current.hostActorId,
   };
 }
@@ -154,6 +179,7 @@ function computeTimers(snap: MultiplayerSnapshot | null, clockOffsetMs: number):
 export default function RoomExperience({ initialSessionId, initialEntry }: { initialSessionId: string; initialEntry?: StoredRoomCredential["entry"] }) {
   const router = useRouter();
   const socketRef = useRef<Socket | null>(null);
+  const closedRef = useRef(false);
   const clockOffsetRef = useRef(0);
   const myActorIdRef = useRef("");
   const wasHostRef = useRef<boolean | null>(null);
@@ -173,6 +199,10 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
   const [lastStandings, setLastStandings] = useState<Array<Record<string, unknown>>>([]);
   const [confirmLeaveMatch, setConfirmLeaveMatch] = useState(false);
   const [confirmHostLeaveRoom, setConfirmHostLeaveRoom] = useState(false);
+  const [kickTarget, setKickTarget] = useState<{ actorId: string; nickname: string } | null>(null);
+  const [categories, setCategories] = useState<CategorySummary[]>([]);
+  const [publicPlaysets, setPublicPlaysets] = useState<PublicPlaysetSummary[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
 
   const applySnapshot = useCallback((incoming: MultiplayerSnapshot) => {
     if (typeof incoming.serverNow === "number" && Number.isFinite(incoming.serverNow)) {
@@ -234,15 +264,20 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
 
     const socket = connectRoom(saved);
     socketRef.current = socket;
+    closedRef.current = false;
     socket.on("connect", () => {
+      if (closedRef.current) return;
       setConnection("connected");
       setMessage("");
       socket.timeout(5000).emit("room:resync", {}, (error: Error | null, response: Ack & { state?: MultiplayerSnapshot }) => {
         if (!error && response?.ok && response.state) applySnapshot(response.state);
       });
     });
-    socket.on("disconnect", () => setConnection("reconnecting"));
+    socket.on("disconnect", () => {
+      if (!closedRef.current) setConnection("reconnecting");
+    });
     socket.on("connect_error", (error: Error) => {
+      if (closedRef.current) return;
       setConnection("reconnecting");
       setMessage(error.message === "UNAUTHORIZED" ? "Room access expired. Rejoin from the lobby." : "Connection interrupted. Reconnecting…");
     });
@@ -269,6 +304,15 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
     socket.on("answer:accepted", () => setAnswering(false));
     socket.on("room:error", (error: { code?: string; message?: string }) => {
       setAnswering(false);
+      if (error?.code === "REMOVED_FROM_ROOM") {
+        closedRef.current = true;
+        clearRoomCredential(saved.sessionId);
+        socket.disconnect();
+        setConnection("closed");
+        setSnapshot(null);
+        setMessage("You were removed from the room by the host.");
+        return;
+      }
       setMessage(error?.message || "The room rejected that action.");
     });
     socket.on("room:host:transferred", (event: { hostActorId?: string; hostNickname?: string | null }) => {
@@ -339,6 +383,7 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
       }
     });
     socket.on("room:closed", () => {
+      closedRef.current = true;
       setConnection("closed");
       setMessage("This room has closed.");
     });
@@ -365,6 +410,32 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
     const interval = window.setInterval(() => void refreshRoom(credential, { keepMessage: true }), 6_000);
     return () => window.clearInterval(interval);
   }, [connection, credential, refreshRoom, snapshot?.status]);
+
+  // Fetch catalog categories and public playsets once (cached 60s on client) so
+  // all participants can see human-readable playset titles and the host can
+  // pick from the searchable modal.
+  useEffect(() => {
+    const controller = new AbortController();
+    Promise.allSettled([
+      fetchCategories({ signal: controller.signal }),
+      fetchPublicPlaysets({ limit: 50, signal: controller.signal }),
+    ]).then(([categoryResult, playsetResult]) => {
+      if (categoryResult.status === "fulfilled") {
+        setCategories(categoryResult.value.categories);
+      }
+      if (playsetResult.status === "fulfilled") {
+        setPublicPlaysets(playsetResult.value.playsets);
+      }
+    }).finally(() => {
+      if (!controller.signal.aborted) setCatalogLoading(false);
+    });
+    return () => controller.abort();
+  }, []);
+
+  const pickerOptions = useMemo(
+    () => buildPlaysetPickerOptions(categories, publicPlaysets),
+    [categories, publicPlaysets],
+  );
 
   useEffect(() => {
     if (!snapshot) return;
@@ -401,6 +472,41 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
     wasHostRef.current = isHost;
   }, [isHost, snapshot]);
   const playerCount = Array.isArray(snapshot?.players) ? snapshot.players.filter((player) => player.role !== "SPECTATOR").length : 0;
+  const currentPlaysetId = asText(snapshot?.playsetId, "");
+  const resolvedPlaysetTitle = useMemo(() => {
+    const directTitle = asText(snapshot?.playsetTitle, "").trim();
+    if (directTitle) return directTitle;
+    const option = pickerOptions.find((entry) => entry.id === currentPlaysetId);
+    if (option?.title) return option.title;
+    return currentPlaysetId ? formatFallbackPlaysetId(currentPlaysetId) : null;
+  }, [currentPlaysetId, pickerOptions, snapshot?.playsetTitle]);
+
+  async function loadUnlistedPlayset(id: string): Promise<{ ok: boolean; message: string; id?: string }> {
+    try {
+      const playset = await fetchPublicPlayset(id);
+      setPublicPlaysets((current) => current.some((item) => item.id === playset.id)
+        ? current
+        : [...current, {
+            id: playset.id,
+            title: playset.title,
+            description: playset.description,
+            metricName: playset.metricName,
+            metricUnit: playset.metricUnit,
+            itemCount: playset.itemCount,
+            revision: playset.revision,
+          }]);
+      return {
+        ok: true,
+        id: playset.id,
+        message: `Selected “${playset.title}” (${playset.itemCount} items).`,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : "That published set could not be loaded.",
+      };
+    }
+  }
   const leaderboard = useMemo(() => {
     const standings = Array.isArray(snapshot?.standings) ? snapshot.standings : [];
     if (standings.length) return standings;
@@ -549,6 +655,22 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
     }
   }
 
+  async function confirmKickPlayer() {
+    if (!credential || !kickTarget) return;
+    const target = kickTarget;
+    setBusy(true);
+    try {
+      const next = await kickRoomPlayer(credential, target.actorId);
+      applySnapshot(next);
+      setKickTarget(null);
+      setMessage(`Removed ${target.nickname} from the room.`);
+    } catch (error) {
+      setMessage(readableError(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function answer(choice: "HIGHER" | "LOWER") {
     const socket = socketRef.current;
     if (!socket || !question.id || submitted || answering || isSpectator || phase !== "QUESTION") return;
@@ -624,7 +746,7 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
           <div>
             <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--accent-action-higher)]">{leftMatch ? (isHost ? "Waiting in room · Host" : "Waiting in room") : isTrueSpectator ? "Spectator view" : isHost ? "You are hosting" : "You're in"}</p>
             <h1 className="text-4xl font-bold leading-none tracking-[-0.07em] text-white [text-shadow:4px_4px_0_var(--accent-time-attack)] sm:text-6xl">ROOM <span className="text-[var(--accent-highlight)]">{asText(snapshot.roomCode, credential.roomCode)}</span></h1>
-            <p className="mt-3 text-sm text-[var(--text-secondary)]">{mode.replaceAll("PVP_", "").replaceAll("_", " ")} · {status.toLowerCase()}</p>
+            <p className="mt-3 text-sm text-[var(--text-secondary)]">{modeLabel(mode)}{resolvedPlaysetTitle ? ` · ${resolvedPlaysetTitle}` : ""} · {status.toLowerCase()}</p>
           </div>
           {status === "RUNNING" && !isTrueSpectator && !leftMatch && (
             <button
@@ -710,13 +832,49 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
             <section className={CARD}>
               <div className="mb-5 flex items-center justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-action-higher)]">Players</p><h2 className="mt-1 text-2xl font-bold">Waiting room</h2></div><span className="inline-flex items-center gap-2 text-sm text-[var(--text-secondary)]"><Users size={16} /> {playerCount}{snapshot.capacity?.maxPlayers ? `/${snapshot.capacity.maxPlayers}` : " players"}</span></div>
               <div className="space-y-2">
-                {playersForList.map((player) => <PlayerRow key={asText(player.actorId)} player={player} />)}
+                {playersForList.map((player) => {
+                  const actorId = asText(player.actorId);
+                  const nickname = asText(player.nickname, "Player");
+                  const canKick =
+                    isHost &&
+                    !isTrueSpectator &&
+                    Boolean(actorId) &&
+                    actorId !== asText(you.actorId) &&
+                    player.isHost !== true;
+                  return (
+                    <PlayerRow
+                      key={actorId}
+                      player={player}
+                      canKick={canKick}
+                      disabled={busy}
+                      onKick={() => setKickTarget({ actorId, nickname })}
+                    />
+                  );
+                })}
                 {playersForList.length === 0 && <p className="text-sm text-[var(--text-muted)]">Loading players…</p>}
               </div>
               <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4"><p className="text-xs leading-5 text-[var(--text-muted)]">Share room code <strong className="tracking-[0.2em] text-white">{snapshot.roomCode || credential.roomCode}</strong> with players joining this match.</p><button type="button" className={OUTLINE} onClick={() => void copyRoomCode()}><Copy size={14} />{copiedCode ? "Copied" : "Copy code"}</button></div>
             </section>
             <section className={`${CARD} flex flex-col justify-between`}>
-              <div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-time-attack)]">Match settings</p><h2 className="mt-1 text-2xl font-bold">{modeLabel(mode)}</h2><SettingsSummary snapshot={snapshot} />{isHost && <RoomSettingsEditor snapshot={snapshot} credential={credential} onSaved={(next) => { applySnapshot(next); setMessage("Room settings updated."); }} />}</div>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-time-attack)]">Match settings</p>
+                <h2 className="mt-1 text-2xl font-bold">{modeLabel(mode)}</h2>
+                <SettingsSummary snapshot={snapshot} playsetTitle={resolvedPlaysetTitle} isHost={isHost} />
+                {isHost && (
+                  <RoomSettingsEditor
+                    snapshot={snapshot}
+                    credential={credential}
+                    pickerOptions={pickerOptions}
+                    resolvedPlaysetTitle={resolvedPlaysetTitle}
+                    catalogLoading={catalogLoading}
+                    onLoadUnlisted={loadUnlistedPlayset}
+                    onSaved={(next) => {
+                      applySnapshot(next);
+                      setMessage("Room settings updated.");
+                    }}
+                  />
+                )}
+              </div>
               <div className="mt-8">
                 {isHost ? <button className={`${BUTTON} w-full`} type="button" disabled={busy || playerCount < 2} onClick={() => void startRoom()}>{busy ? "Starting…" : playerCount < 2 ? "Waiting for another player" : "Start match"}</button> : <p className="rounded-sm border border-white/15 bg-white/[0.03] px-4 py-3 text-center text-xs text-[var(--text-secondary)]">Waiting for the host to start the match…</p>}
                 {isHost && playerCount < 2 && <p className="mt-3 text-center text-[10px] text-[var(--text-muted)]">At least two players are needed to start.</p>}
@@ -797,16 +955,181 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
         {finished && <div className="grid gap-5 md:grid-cols-[0.8fr_1fr]"><section className={`${CARD} text-center`}><Trophy className="mx-auto mb-4 text-[var(--accent-highlight)]" size={30} /><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-action-higher)]">Match complete</p><h2 className="mt-2 text-3xl font-bold">{isTrueSpectator ? "Final leaderboard" : "Your final score"}</h2>{!isTrueSpectator && <p className="mt-3 text-5xl font-black text-[var(--accent-highlight)]">{finalScore}</p>}<p className="mt-3 text-xs leading-5 text-[var(--text-muted)]">{isHost && !isTrueSpectator ? "You are the host. Start a rematch to open the next room, or leave for multiplayer." : "Stay in this room to follow the host’s rematch, or leave for multiplayer."}</p><div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">{isHost && !isTrueSpectator ? <button className={BUTTON} disabled={busy} onClick={() => void rematch()}><RotateCcw size={14} /> Rematch</button> : <button className={OUTLINE} disabled={busy} onClick={() => void waitForHostRematch()}>{busy ? "Checking room…" : "Wait for host rematch"}</button>}<button className={OUTLINE} disabled={busy} onClick={() => void exitRoom()}><LogOut size={14} /> Leave to multiplayer</button></div></section><Leaderboard snapshot={snapshot} entries={leaderboard} isSpectator={isTrueSpectator} results={results} matchRemainingMs={matchRemainingMs} /></div>}
         {cancelled && <section className={`${CARD} mx-auto max-w-xl text-center`}><h2 className="text-2xl font-bold">Room ended</h2><p className="mt-3 text-sm text-[var(--text-secondary)]">The host ended this room. You can return to multiplayer or join another room.</p><Link className={`${BUTTON} mt-6`} href="/multiplayer">Return to multiplayer</Link></section>}
 
-        {status === "LOBBY" && isSpectator && <div className="grid gap-5 md:grid-cols-[1fr_300px]"><section className={CARD}><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-action-higher)]">Spectator seat</p><h2 className="mt-1 text-2xl font-bold">Waiting for the match</h2><p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">The leaderboard will appear when the host starts. You’ll only see player scores and mode stats.</p></section><Leaderboard snapshot={snapshot} entries={leaderboard} isSpectator results={results} matchRemainingMs={matchRemainingMs} /></div>}
+        {status === "LOBBY" && isSpectator && (
+          <div className="grid gap-5 md:grid-cols-[1fr_300px]">
+            <section className={CARD}>
+              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-action-higher)]">Spectator seat</p>
+              <h2 className="mt-1 text-2xl font-bold">Waiting for the match</h2>
+              <p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">The leaderboard will appear when the host starts. You’ll only see player scores and mode stats.</p>
+              <SettingsSummary snapshot={snapshot} playsetTitle={resolvedPlaysetTitle} isHost={false} />
+            </section>
+            <Leaderboard snapshot={snapshot} entries={leaderboard} isSpectator results={results} matchRemainingMs={matchRemainingMs} />
+          </div>
+        )}
       </section>
+      <KickPlayerConfirmDialog
+        target={kickTarget}
+        busy={busy}
+        onCancel={() => setKickTarget(null)}
+        onConfirm={() => void confirmKickPlayer()}
+      />
       <footer className="pb-2 text-center text-[10px] uppercase tracking-[0.12em] text-white/35">Higher or Lower · Party mode</footer>
     </main>
   );
 }
 
-function PlayerRow({ player }: { player: Record<string, unknown> }) {
+function PlayerRow({
+  player,
+  canKick = false,
+  disabled = false,
+  onKick,
+}: {
+  player: Record<string, unknown>;
+  canKick?: boolean;
+  disabled?: boolean;
+  onKick?: () => void;
+}) {
   const spectator = player.role === "SPECTATOR";
-  return <div className="flex items-center justify-between gap-3 rounded-sm border border-white/10 bg-white/[0.025] px-3 py-3"><div className="flex min-w-0 items-center gap-3"><span className="grid size-8 shrink-0 place-items-center rounded-sm bg-white/10 text-xs font-bold text-[var(--accent-highlight)]">{asText(player.nickname, "?").slice(0, 1).toUpperCase()}</span><div className="min-w-0"><p className="truncate text-sm font-bold text-white">{asText(player.nickname, "Player")}</p><p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">{spectator ? "Spectator" : player.isHost === true ? "Host" : "Player"}{typeof player.connected === "boolean" ? ` · ${player.connected ? "Connected" : "Disconnected"}` : ""}</p></div></div>{player.isHost === true && <Crown size={15} className="text-[var(--accent-highlight)]" aria-label="Host" />}</div>;
+  const nickname = asText(player.nickname, "Player");
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-sm border border-white/10 bg-white/[0.025] px-3 py-3">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="grid size-8 shrink-0 place-items-center rounded-sm bg-white/10 text-xs font-bold text-[var(--accent-highlight)]">
+          {asText(player.nickname, "?").slice(0, 1).toUpperCase()}
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-bold text-white">{nickname}</p>
+          <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">
+            {spectator ? "Spectator" : player.isHost === true ? "Host" : "Player"}
+            {typeof player.connected === "boolean" ? ` · ${player.connected ? "Connected" : "Disconnected"}` : ""}
+          </p>
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        {player.isHost === true && <Crown size={15} className="text-[var(--accent-highlight)]" aria-label="Host" />}
+        {canKick && onKick && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={onKick}
+            aria-label={`Kick ${nickname}`}
+            className="inline-flex min-h-8 items-center gap-1.5 rounded-sm border border-[var(--status-error)]/45 bg-[var(--status-error)]/10 px-2.5 text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--status-error)] transition hover:bg-[var(--status-error)] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <UserX size={12} aria-hidden="true" />
+            Kick
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function KickPlayerConfirmDialog({
+  target,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  target: { actorId: string; nickname: string } | null;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const titleId = useId();
+  const open = target !== null;
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (open && !dialog.open) {
+      dialog.showModal();
+      queueMicrotask(() => {
+        cancelButtonRef.current?.focus();
+      });
+    } else if (!open && dialog.open) {
+      dialog.close();
+    }
+  }, [open]);
+
+  // Safari fallback for closedby="any"
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog || "closedBy" in HTMLDialogElement.prototype) return;
+
+    let pressedOutside = false;
+    const isOutside = (event: PointerEvent) => {
+      const rect = dialog.getBoundingClientRect();
+      return (
+        event.clientX < rect.left ||
+        event.clientX > rect.right ||
+        event.clientY < rect.top ||
+        event.clientY > rect.bottom
+      );
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      pressedOutside = isOutside(event);
+    };
+    const handlePointerUp = (event: PointerEvent) => {
+      if (pressedOutside && isOutside(event)) {
+        dialog.close();
+      }
+      pressedOutside = false;
+    };
+
+    dialog.addEventListener("pointerdown", handlePointerDown);
+    dialog.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      dialog.removeEventListener("pointerdown", handlePointerDown);
+      dialog.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, []);
+
+  function handleClose() {
+    const dialog = dialogRef.current;
+    if (dialog) dialog.returnValue = "";
+    onCancel();
+  }
+
+  return (
+    <dialog
+      ref={dialogRef}
+      aria-labelledby={titleId}
+      onClose={handleClose}
+      {...({ closedby: "any" } as Record<string, string>)}
+      className="m-auto w-[min(92vw,28rem)] rounded-md border border-amber-300/40 bg-[#1b1734] p-5 text-white shadow-[0_10px_0_var(--accent-classic)] backdrop:bg-black/75 backdrop:backdrop-blur-xs open:block sm:p-7"
+    >
+      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-highlight)]">Host action</p>
+      <h1 id={titleId} className="mt-2 text-2xl font-bold text-white">
+        Kick {target?.nickname ?? "player"}?
+      </h1>
+      <p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">
+        They will be removed from the waiting room immediately and their room access will be revoked.
+      </p>
+      <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+        <button
+          ref={cancelButtonRef}
+          type="button"
+          autoFocus
+          disabled={busy}
+          onClick={() => dialogRef.current?.close()}
+          className={OUTLINE}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onConfirm}
+          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-sm border border-[var(--status-error)] bg-[var(--status-error)] px-4 text-xs font-bold uppercase tracking-[0.12em] text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <UserX size={14} aria-hidden="true" />
+          {busy ? "Removing…" : "Kick player"}
+        </button>
+      </div>
+    </dialog>
+  );
 }
 
 
@@ -819,27 +1142,65 @@ const ROOM_MODE_OPTIONS: Array<{ id: RoomModeId; label: string }> = [
 ];
 
 /** Host-only lobby controls; the backend rejects edits once the match starts. */
-function RoomSettingsEditor({ snapshot, credential, onSaved }: { snapshot: MultiplayerSnapshot; credential: StoredRoomCredential | null; onSaved: (next: MultiplayerSnapshot) => void }) {
+function RoomSettingsEditor({
+  snapshot,
+  credential,
+  pickerOptions,
+  resolvedPlaysetTitle,
+  catalogLoading,
+  onLoadUnlisted,
+  onSaved,
+}: {
+  snapshot: MultiplayerSnapshot;
+  credential: StoredRoomCredential | null;
+  pickerOptions: readonly PlaysetPickerOption[];
+  resolvedPlaysetTitle: string | null;
+  catalogLoading: boolean;
+  onLoadUnlisted: (playsetId: string) => Promise<{ ok: boolean; message: string; id?: string }>;
+  onSaved: (next: MultiplayerSnapshot) => void;
+}) {
   const settings = object(snapshot.settings);
   const currentMode = asText(snapshot.mode, "PVP_SPEED") as RoomModeId;
-  const currentPlayset = asText((snapshot as unknown as Record<string, unknown>).playsetId, "");
+  const currentPlayset = asText(snapshot.playsetId, "");
+  const currentRounds = asNumber(settings.roundCount, 5);
+  const currentSeconds = asNumber(Math.round(asNumber(settings.roundDurationMs, 15_000) / 1_000), 15);
+  const currentMinutes = asNumber(Math.round(asNumber(settings.matchDurationMs, 300_000) / 60_000), 5);
+
   const [mode, setMode] = useState<RoomModeId>(currentMode);
   const [playsetId, setPlaysetId] = useState(currentPlayset);
-  const [rounds, setRounds] = useState(asNumber(settings.roundCount, 5));
-  const [seconds, setSeconds] = useState(asNumber(Math.round(asNumber(settings.roundDurationMs, 15_000) / 1_000), 15));
-  const [minutes, setMinutes] = useState(asNumber(Math.round(asNumber(settings.matchDurationMs, 300_000) / 60_000), 5));
-  const [playsets, setPlaysets] = useState<Array<{ id: string; title: string }>>([]);
+  const [rounds, setRounds] = useState(currentRounds);
+  const [seconds, setSeconds] = useState(currentSeconds);
+  const [minutes, setMinutes] = useState(currentMinutes);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
   const scoreRace = mode === "PVP_SCORE_RACE";
 
+  // Keep local controls synchronized only when the incoming room snapshot changes
+  // externally (e.g., host transfer), without discarding unsaved local edits.
+  const prevSynced = useRef({
+    mode: currentMode,
+    playsetId: currentPlayset,
+    rounds: currentRounds,
+    seconds: currentSeconds,
+    minutes: currentMinutes,
+  });
   useEffect(() => {
-    let cancelled = false;
-    fetchPublicPlaysets({ limit: 50 })
-      .then((page) => { if (!cancelled) setPlaysets(page.playsets.map((playset) => ({ id: playset.id, title: playset.title }))); })
-      .catch(() => undefined);
-    return () => { cancelled = true; };
-  }, []);
+    const prev = prevSynced.current;
+    queueMicrotask(() => {
+      if (prev.mode !== currentMode) setMode(currentMode);
+      if (prev.playsetId !== currentPlayset) setPlaysetId(currentPlayset);
+      if (prev.rounds !== currentRounds) setRounds(currentRounds);
+      if (prev.seconds !== currentSeconds) setSeconds(currentSeconds);
+      if (prev.minutes !== currentMinutes) setMinutes(currentMinutes);
+      prevSynced.current = {
+        mode: currentMode,
+        playsetId: currentPlayset,
+        rounds: currentRounds,
+        seconds: currentSeconds,
+        minutes: currentMinutes,
+      };
+    });
+  }, [currentMinutes, currentMode, currentPlayset, currentRounds, currentSeconds]);
 
   async function save() {
     if (!credential) return;
@@ -868,12 +1229,15 @@ function RoomSettingsEditor({ snapshot, credential, onSaved }: { snapshot: Multi
           <button key={option.id} type="button" onClick={() => setMode(option.id)} className={`min-h-9 rounded-sm border px-3 text-[11px] font-bold uppercase tracking-[0.1em] ${mode === option.id ? "border-[var(--accent-highlight)] bg-[var(--accent-highlight)]/15 text-white" : "border-white/20 text-[var(--text-secondary)] hover:border-white/40"}`}>{option.label}</button>
         ))}
       </div>
-      <label className="block">Category / playset
-        <select className="mt-1.5 w-full rounded-sm border border-white/20 bg-[#15122b] px-3 py-2 text-sm text-white" value={playsetId} onChange={(event) => setPlaysetId(event.target.value)}>
-          {playsetId === "" && <option value="">Current selection</option>}
-          {playsets.map((playset) => <option key={playset.id} value={playset.id}>{playset.title}</option>)}
-        </select>
-      </label>
+      <PlaysetPickerField
+        options={pickerOptions}
+        selectedId={playsetId}
+        selectedTitleFallback={resolvedPlaysetTitle}
+        onSelect={setPlaysetId}
+        disabled={busy}
+        loading={catalogLoading}
+        onLoadUnlisted={onLoadUnlisted}
+      />
       {scoreRace ? (
         <label className="flex items-center justify-between gap-3 border-t border-white/10 pt-3">Match length
           <select className="rounded-sm border border-white/20 bg-[#15122b] px-3 py-1.5 text-sm text-white" value={minutes} onChange={(event) => setMinutes(Number(event.target.value))}>
@@ -902,10 +1266,32 @@ function RoomSettingsEditor({ snapshot, credential, onSaved }: { snapshot: Multi
   );
 }
 
-function SettingsSummary({ snapshot }: { snapshot: MultiplayerSnapshot }) {
+function SettingsSummary({ snapshot, playsetTitle, isHost }: { snapshot: MultiplayerSnapshot; playsetTitle: string | null; isHost: boolean }) {
   const settings = object(snapshot.settings);
   const scoreRace = snapshot.mode === "PVP_SCORE_RACE";
-  return <div className="mt-5 space-y-3 text-sm text-[var(--text-secondary)]"><p>Mode and category are locked for this room; start a new room to change them.</p><div className="flex justify-between border-t border-white/10 pt-3"><span>Game mode</span><strong className="text-white">{modeLabel(asText(snapshot.mode, "PVP_SPEED"))}</strong></div><div className="flex justify-between border-t border-white/10 pt-3"><span>{scoreRace ? "Match length" : "Rounds"}</span><strong className="text-white">{scoreRace ? `${Math.round(asNumber(settings.matchDurationMs, 300_000) / 60_000)} min` : asNumber(settings.roundCount, 5)}</strong></div>{!scoreRace && <div className="flex justify-between border-t border-white/10 pt-3"><span>Answer time</span><strong className="text-white">{Math.round(asNumber(settings.roundDurationMs, 15_000) / 1000)} sec</strong></div>}</div>;
+  return (
+    <div className="mt-5 space-y-3 text-sm text-[var(--text-secondary)]">
+      <p>{isHost ? "Change the playset, mode, or match rules below before starting." : "The host can adjust the playset, mode, and rules before starting."}</p>
+      <div className="flex justify-between gap-4 border-t border-white/10 pt-3">
+        <span>Category / playset</span>
+        <strong className="text-right text-white">{playsetTitle || "Loading…"}</strong>
+      </div>
+      <div className="flex justify-between gap-4 border-t border-white/10 pt-3">
+        <span>Game mode</span>
+        <strong className="text-white">{modeLabel(asText(snapshot.mode, "PVP_SPEED"))}</strong>
+      </div>
+      <div className="flex justify-between gap-4 border-t border-white/10 pt-3">
+        <span>{scoreRace ? "Match length" : "Rounds"}</span>
+        <strong className="text-white">{scoreRace ? `${Math.round(asNumber(settings.matchDurationMs, 300_000) / 60_000)} min` : asNumber(settings.roundCount, 5)}</strong>
+      </div>
+      {!scoreRace && (
+        <div className="flex justify-between gap-4 border-t border-white/10 pt-3">
+          <span>Answer time</span>
+          <strong className="text-white">{Math.round(asNumber(settings.roundDurationMs, 15_000) / 1000)} sec</strong>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function QuestionCard({ item, label, revealed }: { item: Record<string, unknown>; label: string; revealed: boolean }) {

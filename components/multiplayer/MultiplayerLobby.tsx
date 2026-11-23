@@ -16,7 +16,16 @@ import {
   type RoomCredentialResponse,
   type RoomMode,
 } from "@/lib/backend";
-import { createSpectatorCredential, readRoomCredential, storeRoomCredential, type MultiplayerSnapshot } from "@/lib/backend/multiplayer";
+import {
+  createSpectatorCredential,
+  readRoomCredential,
+  storeRoomCredential,
+  type MultiplayerSnapshot,
+} from "@/lib/backend/multiplayer";
+import {
+  PlaysetPickerField,
+  buildPlaysetPickerOptions,
+} from "@/components/multiplayer/PlaysetPickerModal";
 
 const ROOM_MODES: ReadonlyArray<{ id: RoomMode; label: string; description: string }> = [
   { id: "PVP_SPEED", label: "Speed", description: "Shared rounds. Fastest correct answer wins." },
@@ -43,8 +52,7 @@ export default function MultiplayerLobby() {
   const [mode, setMode] = useState<RoomMode>("PVP_SPEED");
   const [categories, setCategories] = useState<CategorySummary[]>([]);
   const [customPlaysets, setCustomPlaysets] = useState<PublicPlaysetSummary[]>([]);
-  const [customPlaysetId, setCustomPlaysetId] = useState("");
-  const [customPlaysetStatus, setCustomPlaysetStatus] = useState("");
+  const [catalogLoading, setCatalogLoading] = useState(true);
   const [playsetId, setPlaysetId] = useState("");
   const [status, setStatus] = useState("");
   const [copied, setCopied] = useState(false);
@@ -59,6 +67,10 @@ export default function MultiplayerLobby() {
   const playableCategories = useMemo(
     () => categories.filter((category) => category.playable && category.playsetId),
     [categories],
+  );
+  const pickerOptions = useMemo(
+    () => buildPlaysetPickerOptions(playableCategories, customPlaysets),
+    [playableCategories, customPlaysets],
   );
 
   useEffect(() => {
@@ -76,10 +88,17 @@ export default function MultiplayerLobby() {
         setCategories(categoryResult.value.categories);
         setPlaysetId((current) => current || available[0]?.playsetId || "");
       }
-      if (playsetResult.status === "fulfilled") setCustomPlaysets(playsetResult.value.playsets);
+      if (playsetResult.status === "fulfilled") {
+        setCustomPlaysets(playsetResult.value.playsets);
+        if (categoryResult.status !== "fulfilled" && playsetResult.value.playsets.length > 0) {
+          setPlaysetId((current) => current || playsetResult.value.playsets[0].id);
+        }
+      }
       if (categoryResult.status === "rejected" && playsetResult.status === "rejected") {
         setStatus("The game service is waking up. Try again in a moment.");
       }
+    }).finally(() => {
+      if (!controller.signal.aborted) setCatalogLoading(false);
     });
     return () => controller.abort();
   }, []);
@@ -88,14 +107,7 @@ export default function MultiplayerLobby() {
     setStatus(error instanceof BackendApiError ? error.message : "Something went wrong. Please try again.");
   }
 
-  async function loadUnlistedPlayset() {
-    const id = customPlaysetId.trim();
-    if (!id) {
-      setCustomPlaysetStatus("Enter the playset ID from its shared link.");
-      return;
-    }
-    setBusy(true);
-    setCustomPlaysetStatus("");
+  async function loadUnlistedPlayset(id: string): Promise<{ ok: boolean; message: string; id?: string }> {
     try {
       const playset = await fetchPublicPlayset(id);
       setCustomPlaysets((current) => current.some((item) => item.id === playset.id)
@@ -110,11 +122,16 @@ export default function MultiplayerLobby() {
             revision: playset.revision,
           }]);
       setPlaysetId(playset.id);
-      setCustomPlaysetStatus(`Selected “${playset.title}” (${playset.itemCount} items).`);
+      return {
+        ok: true,
+        id: playset.id,
+        message: `Selected “${playset.title}” (${playset.itemCount} items).`,
+      };
     } catch (error) {
-      setCustomPlaysetStatus(error instanceof Error ? error.message : "That published set could not be loaded.");
-    } finally {
-      setBusy(false);
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : "That published set could not be loaded.",
+      };
     }
   }
 
@@ -232,42 +249,16 @@ export default function MultiplayerLobby() {
               <input className={`${inputClass} mt-2 normal-case tracking-normal`} maxLength={18} placeholder="e.g. Quiz captain" value={nickname} onChange={(event) => setNickname(event.target.value)} />
             </label>
 
-            <label className="mb-5 block text-xs font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-              Category or published playset
-              <select
-                className={`${inputClass} mt-2`}
-                value={playsetId}
-                onChange={(event) => setPlaysetId(event.target.value)}
-                disabled={busy || (playableCategories.length === 0 && customPlaysets.length === 0)}
-              >
-                {playableCategories.length === 0 && customPlaysets.length === 0 ? (
-                  <option value="">Loading available categories…</option>
-                ) : (
-                  <>
-                    {playableCategories.length > 0 && <optgroup label="Built-in categories">
-                      {playableCategories.map((category) => (
-                        <option key={category.playsetId} value={category.playsetId ?? ""}>{category.title}</option>
-                      ))}
-                    </optgroup>}
-                    {customPlaysets.length > 0 && <optgroup label="Public custom playsets">
-                      {customPlaysets.map((playset) => (
-                        <option key={playset.id} value={playset.id}>{playset.title} · {playset.itemCount} items</option>
-                      ))}
-                    </optgroup>}
-                  </>
-                )}
-              </select>
-            </label>
-
-            <details className="mb-5 rounded-sm border border-white/15 bg-white/[0.02] px-4 py-3">
-              <summary className="cursor-pointer text-xs font-bold uppercase tracking-[0.1em] text-[var(--text-secondary)]">Use an unlisted set</summary>
-              <p className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">Paste the playset ID from an unlisted set’s shared link. The set must be published and playable.</p>
-              <div className="mt-3 flex gap-2">
-                <input className={inputClass} aria-label="Unlisted playset ID" value={customPlaysetId} onChange={(event) => setCustomPlaysetId(event.target.value)} placeholder="Playset ID" />
-                <button type="button" className="shrink-0 rounded-sm border border-white/30 px-3 text-[10px] font-bold uppercase text-white hover:bg-white/10 disabled:opacity-50" disabled={busy} onClick={() => void loadUnlistedPlayset()}>Load</button>
-              </div>
-              {customPlaysetStatus && <p role="status" className="mt-2 text-[11px] text-[var(--accent-highlight)]">{customPlaysetStatus}</p>}
-            </details>
+            <PlaysetPickerField
+              className="mb-5"
+              label="Category or published playset"
+              options={pickerOptions}
+              selectedId={playsetId}
+              onSelect={setPlaysetId}
+              disabled={busy}
+              loading={catalogLoading}
+              onLoadUnlisted={loadUnlistedPlayset}
+            />
 
             <fieldset className="mb-5">
               <legend className="mb-2 text-xs font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Game mode</legend>

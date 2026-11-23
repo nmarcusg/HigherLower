@@ -15,6 +15,8 @@ export interface MultiplayerSnapshot {
   phase?: string;
   mode?: string;
   rulesVersion?: string;
+  playsetId?: string;
+  playsetTitle?: string | null;
   hostActorId?: string;
   you?: {
     actorId?: string;
@@ -192,6 +194,11 @@ export interface RoomSettingsPatch {
 /** Host-only edits while the room is still a lobby. */
 export function updateRoomSettings(credential: RoomCredential, patch: RoomSettingsPatch): Promise<MultiplayerSnapshot> {
   return roomRequest(credential, "/settings", "PATCH", patch);
+}
+
+/** Host-only removal of another participant from the room. */
+export function kickRoomPlayer(credential: RoomCredential, actorId: string): Promise<MultiplayerSnapshot> {
+  return roomRequest(credential, "/kick", "POST", { actorId });
 }
 
 export async function createSpectatorCredential(code: string, nickname: string): Promise<{ sessionId: string; roomCode: string; gameToken: string; state: MultiplayerSnapshot }> {
