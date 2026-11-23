@@ -13,6 +13,7 @@ import {
   getRoomState,
   readRoomCredential,
   roomAction,
+  storeRoomCredential,
   type MultiplayerSnapshot,
   type StoredRoomCredential,
 } from "@/lib/backend/multiplayer";
@@ -119,9 +120,10 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
     socket.on("room:postmatch", () => void refreshRoom(saved));
     socket.on("room:rematch", (event: { nextSessionId?: string }) => {
       if (event.nextSessionId) {
-        const nextCredential = { ...saved, sessionId: event.nextSessionId };
+        const nextCredential = { ...saved, sessionId: event.nextSessionId, state: undefined };
+        storeRoomCredential(nextCredential);
         setCredential(nextCredential);
-        window.localStorage.setItem("higher-lower:room-credential:v1", JSON.stringify(nextCredential));
+        setResults(null);
         router.replace(`/multiplayer/room/${encodeURIComponent(event.nextSessionId)}`);
       }
     });
@@ -246,8 +248,10 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
     setBusy(true);
     try {
       const next = await roomAction<MultiplayerSnapshot>(credential, "rematch");
-      const nextCredential = { ...credential, sessionId: next.sessionId };
-      window.localStorage.setItem("higher-lower:room-credential:v1", JSON.stringify(nextCredential));
+      const nextCredential = { ...credential, sessionId: next.sessionId, state: next };
+      // Write every slot: a stale sessionStorage entry for the old room would
+      // otherwise shadow the new session and strand this tab on "unavailable".
+      storeRoomCredential(nextCredential);
       setCredential(nextCredential);
       setSnapshot(next);
       setResults(null);
