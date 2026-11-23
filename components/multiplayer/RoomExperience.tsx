@@ -117,6 +117,15 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
     };
   }, [initialSessionId, refreshRoom, router]);
 
+  // Lobby joins are HTTP lifecycle operations, so an already-attached host does
+  // not receive a socket event when somebody joins. A short, bounded poll keeps
+  // the waiting room truthful without adding a second lobby socket protocol.
+  useEffect(() => {
+    if (!credential || snapshot?.status !== "LOBBY") return;
+    const interval = window.setInterval(() => void refreshRoom(credential), 2_000);
+    return () => window.clearInterval(interval);
+  }, [credential, refreshRoom, snapshot?.status]);
+
   useEffect(() => {
     const ticker = window.setInterval(() => {
       if (!snapshot) return;
@@ -151,6 +160,17 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
   const revealed = phase === "REVEAL" || phase === "FINISHED";
   const isScoreRace = mode === "PVP_SCORE_RACE";
   const score = asNumber(you.score);
+  const savedPlayer = Array.isArray(results?.players)
+    ? results.players.find((player) => object(player).actorId === you.actorId)
+    : undefined;
+  const persistedPlayer = Array.isArray(snapshot?.players)
+    ? snapshot.players.find((player) => player.actorId === you.actorId)
+    : undefined;
+  // Terminal HTTP room views intentionally expose the score in `players`, not
+  // `you`. Prefer that durable source so a post-match refresh cannot turn a
+  // previously displayed final score into zero.
+  const finalScore = asNumber(object(savedPlayer).score, asNumber(object(persistedPlayer).score, score));
+  const hp = Math.max(0, Math.min(100, asNumber(you.hp)));
 
   async function startRoom() {
     if (!credential) return;
@@ -272,7 +292,7 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
         {(status === "RUNNING" || status === "FINALIZING") && (
           <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
             <section className={CARD}>
-              <div className="mb-6 flex flex-wrap items-center justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-action-higher)]">{isSpectator ? "Live leaderboard" : isScoreRace ? "Race clock" : `Round ${currentRound}${totalRounds ? ` of ${totalRounds}` : ""}`}</p><h2 className="mt-1 text-2xl font-bold">{phaseLabel(phase)}</h2></div><div className="rounded-sm border border-white/20 bg-white/[0.04] px-4 py-2 text-lg font-bold tabular-nums text-[var(--accent-highlight)]">{formatSeconds(remainingMs)}</div></div>
+              <div className="mb-6 flex flex-wrap items-center justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-action-higher)]">{isSpectator ? "Live leaderboard" : isScoreRace ? "Race clock" : `Round ${currentRound}${totalRounds ? ` of ${totalRounds}` : ""}`}</p><h2 className="mt-1 text-2xl font-bold">{phaseLabel(phase)}</h2></div><div className="flex items-center gap-3">{mode.includes("HP") && !isSpectator && <div className="min-w-32"><div className="mb-1 flex justify-between text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]"><span>Health</span><span>{hp}/100</span></div><div className="h-2 overflow-hidden rounded-full border border-white/20 bg-white/10"><div className="h-full bg-[var(--status-success)] transition-[width] duration-300" style={{ width: `${hp}%` }} /></div></div>}<div className="rounded-sm border border-white/20 bg-white/[0.04] px-4 py-2 text-lg font-bold tabular-nums text-[var(--accent-highlight)]">{formatSeconds(remainingMs)}</div></div></div>
               {isSpectator ? (
                 <div className="rounded-sm border border-dashed border-white/20 bg-white/[0.02] p-6 text-center"><Trophy className="mx-auto mb-3 text-[var(--accent-highlight)]" size={24} /><h3 className="text-lg font-bold">Watching the match</h3><p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">Spectators see scores and mode stats only. Questions and answers stay hidden.</p></div>
               ) : (
@@ -296,7 +316,7 @@ export default function RoomExperience({ initialSessionId }: { initialSessionId:
           </div>
         )}
 
-        {finished && <div className="grid gap-5 md:grid-cols-[0.8fr_1fr]"><section className={`${CARD} text-center`}><Trophy className="mx-auto mb-4 text-[var(--accent-highlight)]" size={30} /><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-action-higher)]">Match complete</p><h2 className="mt-2 text-3xl font-bold">{isSpectator ? "Final leaderboard" : "Your final score"}</h2>{!isSpectator && <p className="mt-3 text-5xl font-black text-[var(--accent-highlight)]">{score}</p>}<p className="mt-3 text-xs leading-5 text-[var(--text-muted)]">Results are saved. You can leave this room or start a rematch.</p><div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">{isHost && !isSpectator && <button className={BUTTON} disabled={busy} onClick={() => void rematch()}><RotateCcw size={14} /> Rematch</button>}<button className={OUTLINE} disabled={busy} onClick={() => void exitRoom()}><LogOut size={14} /> Back to lobby</button></div></section><Leaderboard snapshot={snapshot} entries={leaderboard} isSpectator={isSpectator} results={results} /></div>}
+        {finished && <div className="grid gap-5 md:grid-cols-[0.8fr_1fr]"><section className={`${CARD} text-center`}><Trophy className="mx-auto mb-4 text-[var(--accent-highlight)]" size={30} /><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-action-higher)]">Match complete</p><h2 className="mt-2 text-3xl font-bold">{isSpectator ? "Final leaderboard" : "Your final score"}</h2>{!isSpectator && <p className="mt-3 text-5xl font-black text-[var(--accent-highlight)]">{finalScore}</p>}<p className="mt-3 text-xs leading-5 text-[var(--text-muted)]">Results are saved. You can leave this room or start a rematch.</p><div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">{isHost && !isSpectator && <button className={BUTTON} disabled={busy} onClick={() => void rematch()}><RotateCcw size={14} /> Rematch</button>}<button className={OUTLINE} disabled={busy} onClick={() => void exitRoom()}><LogOut size={14} /> Back to lobby</button></div></section><Leaderboard snapshot={snapshot} entries={leaderboard} isSpectator={isSpectator} results={results} /></div>}
         {cancelled && <section className={`${CARD} mx-auto max-w-xl text-center`}><h2 className="text-2xl font-bold">Room ended</h2><p className="mt-3 text-sm text-[var(--text-secondary)]">The host ended this room. You can return to multiplayer or join another room.</p><Link className={`${BUTTON} mt-6`} href="/multiplayer">Return to multiplayer</Link></section>}
 
         {status === "LOBBY" && isSpectator && <div className="grid gap-5 md:grid-cols-[1fr_300px]"><section className={CARD}><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-action-higher)]">Spectator seat</p><h2 className="mt-1 text-2xl font-bold">Waiting for the match</h2><p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">The leaderboard will appear when the host starts. You’ll only see player scores and mode stats.</p></section><Leaderboard snapshot={snapshot} entries={leaderboard} isSpectator results={results} /></div>}
