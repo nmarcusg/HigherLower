@@ -42,6 +42,7 @@ export interface SoloPublicItem {
   id: string;
   name: string;
   imageUrl: string | null;
+  attribution?: string;
   displayValue?: string;
 }
 

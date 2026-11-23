@@ -29,8 +29,8 @@ export interface MultiplayerSnapshot {
   question?: {
     id?: string;
     roundNumber?: number;
-    left?: { id?: string; name?: string; displayValue?: string; imageUrl?: string | null };
-    right?: { id?: string; name?: string; displayValue?: string; imageUrl?: string | null };
+    left?: { id?: string; name?: string; displayValue?: string; imageUrl?: string | null; attribution?: string };
+    right?: { id?: string; name?: string; displayValue?: string; imageUrl?: string | null; attribution?: string };
     closesAt?: number;
     correctChoice?: "HIGHER" | "LOWER";
   } | null;

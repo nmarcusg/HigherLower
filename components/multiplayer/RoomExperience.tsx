@@ -339,8 +339,9 @@ function SettingsSummary({ snapshot }: { snapshot: MultiplayerSnapshot }) {
 
 function QuestionCard({ item, label, revealed }: { item: Record<string, unknown>; label: string; revealed: boolean }) {
   const imageUrl = typeof item.imageUrl === "string" ? item.imageUrl : null;
+  const attribution = typeof item.attribution === "string" ? item.attribution : null;
   return <div className="relative flex min-h-52 flex-col justify-end overflow-hidden rounded-sm border border-white/15 bg-[#15122b] p-4 sm:min-h-64">{imageUrl && <Image src={imageUrl} alt="" fill unoptimized className="object-cover opacity-25" sizes="(max-width: 640px) 100vw, 50vw" />}
-    <div className="relative z-10"><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-action-higher)]">{label}</p><h3 className="mt-2 text-xl font-bold text-white sm:text-2xl">{asText(item.name, "Loading comparison…")}</h3>{revealed && <p className="mt-3 text-2xl font-black text-[var(--accent-highlight)]">{asText(item.displayValue, "")}</p>}</div>
+    <div className="relative z-10"><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-action-higher)]">{label}</p><h3 className="mt-2 text-xl font-bold text-white sm:text-2xl">{asText(item.name, "Loading comparison…")}</h3>{revealed && <p className="mt-3 text-2xl font-black text-[var(--accent-highlight)]">{asText(item.displayValue, "")}</p>}{attribution && <p className="mt-2 text-[10px] leading-snug text-white/75">Image: {attribution}</p>}</div>
   </div>;
 }
 

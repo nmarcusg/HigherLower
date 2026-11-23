@@ -56,6 +56,7 @@ function toGameItem(item: SoloSessionState["left"]): GameItem | null {
     imageUrl: item.imageUrl ?? "",
     value: 0,
     displayValue: item.displayValue ?? "",
+    attribution: item.attribution,
   };
 }
 
