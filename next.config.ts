@@ -15,10 +15,16 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "flagcdn.com",
       },
-      // Wikimedia Commons — some flag SVGs/PNGs served from here
+      // Wikimedia Commons — flag assets and artist photos. `Special:FilePath`
+      // lives on the wiki host, not the upload CDN.
       {
         protocol: "https",
         hostname: "upload.wikimedia.org",
+      },
+      {
+        protocol: "https",
+        hostname: "commons.wikimedia.org",
+        pathname: "/wiki/Special:FilePath/**",
       },
       // Steam CDN variants (SteamSpy game headers)
       {
@@ -55,6 +61,11 @@ const nextConfig: NextConfig = {
       {
         protocol: "https",
         hostname: "archive.org",
+      },
+      // Cover Art Archive thumbnails (album release dates)
+      {
+        protocol: "https",
+        hostname: "coverartarchive.org",
       },
     ],
 
