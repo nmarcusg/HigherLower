@@ -364,29 +364,6 @@ export default function HomeSetup({ catalog }: HomeSetupProps) {
           </motion.div>
         </section>
 
-        {/* Setup — the only explicit in-page navigation destination. */}
-        <div ref={setupRef} id="setup" className="scroll-mt-4">
-          <motion.div
-            initial={false}
-            animate={setupArrived && !prefersReducedMotion
-              ? { opacity: [0.88, 1], transform: ["translateY(6px)", "translateY(0px)"] }
-              : { opacity: 1, transform: "translateY(0px)" }}
-            transition={{ duration: prefersReducedMotion ? 0.01 : 0.22, ease: [0.23, 1, 0.32, 1] }}
-          >
-            <DomainSelector
-              domains={domains}
-              selectedDomainId={selectedDomainId}
-              onSelect={selectDomain}
-            />
-          </motion.div>
-
-          <CategorySelector
-            categories={activeDomain?.categories ?? []}
-            selectedCategoryId={selectedCategory?.id ?? null}
-            onSelect={selectCategory}
-          />
-        </div>
-
         <section
           aria-labelledby="mode-selector-heading"
           className="pt-[var(--space-section-tight)]"
@@ -428,6 +405,30 @@ export default function HomeSetup({ catalog }: HomeSetupProps) {
             </Link>
           </div>
         </section>
+
+        {/* Setup — the only explicit in-page navigation destination. */}
+        <div ref={setupRef} id="setup" className="scroll-mt-4">
+          <motion.div
+            initial={false}
+            animate={setupArrived && !prefersReducedMotion
+              ? { opacity: [0.88, 1], transform: ["translateY(6px)", "translateY(0px)"] }
+              : { opacity: 1, transform: "translateY(0px)" }}
+            transition={{ duration: prefersReducedMotion ? 0.01 : 0.22, ease: [0.23, 1, 0.32, 1] }}
+          >
+            <DomainSelector
+              domains={domains}
+              selectedDomainId={selectedDomainId}
+              onSelect={selectDomain}
+            />
+          </motion.div>
+
+          <CategorySelector
+            categories={activeDomain?.categories ?? []}
+            selectedCategoryId={selectedCategory?.id ?? null}
+            onSelect={selectCategory}
+          />
+        </div>
+
 
         <section
           aria-labelledby="ready-heading"

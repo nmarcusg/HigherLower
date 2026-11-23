@@ -34,6 +34,16 @@ export function backendCategoryIdFor(
   return BACKEND_CATEGORY_BY_SEMANTIC_ID[categoryId];
 }
 
+/** Reverse lookup: backend playset id -> semantic category id (null for custom sets). */
+export function semanticCategoryIdForBackend(
+  backendId: string,
+): SemanticCategoryId | null {
+  const match = (Object.entries(BACKEND_CATEGORY_BY_SEMANTIC_ID) as Array<
+    [SemanticCategoryId, string]
+  >).find(([, id]) => id === backendId);
+  return match?.[0] ?? null;
+}
+
 export function backendCategoryFor(
   categoryId: SemanticCategoryId,
   catalog: CategoryPage,

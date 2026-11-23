@@ -77,6 +77,9 @@ function isIgnoredKeyTarget(event: KeyboardEvent): boolean {
   return Boolean(target.closest("input, textarea, select, button, a[href], [contenteditable], [role='button']"));
 }
 
+import { semanticCategoryIdForBackend } from "@/lib/backend/catalogProjection";
+import { writeHighScore } from "@/lib/highScores/storage";
+
 export default function BackendSoloGame({ playsetId, categoryLabel, mode }: BackendSoloGameProps) {
   const router = useRouter();
   const apiMode: SoloMode = mode === "time-attack" ? "TIME_ATTACK" : "CLASSIC";
@@ -166,7 +169,16 @@ export default function BackendSoloGame({ playsetId, categoryLabel, mode }: Back
     setCredential(saved);
     setBusy(true);
     getSoloSession(saved.sessionId, saved.gameToken)
-      .then((restored) => applyState(restored))
+      .then((restored) => {
+        // A finished run must not be resumed as if it were a new game: pressing
+        // Play again would otherwise replay the old score.
+        if (restored.status !== "RUNNING") {
+          sessionStorage.removeItem(storageKey);
+          void createFreshSession();
+          return;
+        }
+        applyState(restored);
+      })
       .catch((cause: unknown) => {
         if (cause instanceof BackendApiError && [401, 403, 404].includes(cause.status ?? 0)) {
           sessionStorage.removeItem(storageKey);
@@ -333,6 +345,14 @@ export default function BackendSoloGame({ playsetId, categoryLabel, mode }: Back
       .catch((cause) => setError(cause instanceof Error ? cause.message : "Could not confirm the timer result."))
       .finally(() => { expiryRefreshPending.current = false; });
   }, [applyState, credential, mode, phase, timeRemaining]);
+
+  useEffect(() => {
+    if (phase !== "game-over" || state?.status !== "FINISHED") return;
+    const categoryId = semanticCategoryIdForBackend(playsetId);
+    if (!categoryId) return;
+    const finalScore = Math.max(0, Math.trunc(Number(state.score) || 0));
+    writeHighScore({ mode: apiMode === "TIME_ATTACK" ? "time-attack" : "classic", categoryId }, finalScore);
+  }, [apiMode, phase, playsetId, state?.score, state?.status]);
 
   useEffect(() => {
     if (phase !== "game-over" || !credential || state?.status !== "FINISHED") return;

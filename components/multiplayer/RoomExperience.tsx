@@ -216,8 +216,8 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
     }
     try {
       await navigator.clipboard.writeText(code);
+      // The button itself shows "Copied"; no banner, so the layout never shifts.
       setCopiedCode(true);
-      setMessage("Room code copied. Share it with your players.");
       window.setTimeout(() => setCopiedCode(false), 1800);
     } catch {
       setCopiedCode(false);
@@ -240,9 +240,18 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
     setBusy(true);
     try {
       await roomAction(credential, "leave");
-      clearRoomCredential(credential.sessionId);
-      router.replace("/multiplayer");
-    } catch (error) { setMessage(readableError(error)); setBusy(false); }
+    } catch (error) {
+      // An expired or revoked token cannot accept a leave call. Drop the local
+      // credential and go back anyway, otherwise the button loops in place.
+      const status = (error as { status?: number }).status;
+      if (status !== 401 && status !== 403) {
+        setMessage(readableError(error));
+        setBusy(false);
+        return;
+      }
+    }
+    clearRoomCredential(credential.sessionId);
+    router.replace("/multiplayer");
   }
 
   async function rematch() {
@@ -501,7 +510,7 @@ function Leaderboard({ snapshot, entries, isSpectator, results, matchRemainingMs
   return <aside className={CARD} aria-label="Leaderboard"><div className="mb-5 flex items-center justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-time-attack)]">{isSpectator ? "Tournament view" : "Standings"}</p><h2 className="mt-1 text-xl font-bold">Leaderboard</h2></div><Trophy size={19} className="text-[var(--accent-highlight)]" /></div><ol className="space-y-2">{entries.map((entry, index) => {
     const actorId = asText(entry.actorId);
     const stats = statsByActor.get(actorId) ?? entry;
-    return <li key={actorId || index} className={`rounded-sm border border-white/10 bg-white/[0.025] px-3 py-3 ${stats.eliminated === true || stats.connected === false || entry.connected === false ? "opacity-45 grayscale" : ""}`}><div className="flex items-center gap-3"><span className={`grid size-8 shrink-0 place-items-center rounded-sm text-xs font-black ${index === 0 ? "bg-[var(--accent-highlight)] text-[#201b3b]" : "bg-white/10 text-white"}`}>{asNumber(entry.rank, index + 1)}</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold text-white">{asText(entry.nickname, "Player")}</p><p className="text-[10px] text-[var(--text-muted)]">{stats.eliminated === true ? "Eliminated" : stats.connected === false ? "Disconnected" : asText(snapshot.status) === "FINISHED" ? "Match finished" : "In match"}</p></div><strong className="text-sm tabular-nums text-[var(--accent-highlight)]">{asNumber(entry.score)}</strong></div><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 pl-11 text-[10px] text-[var(--text-muted)]">{mode.includes("HP") && <span>HP {asNumber(entry.hp, asNumber(stats.finalHp, 0))}</span>}{mode.includes("STREAK") && <span>Streak {asNumber(entry.streak, asNumber(stats.maxStreak, 0))}</span>}{snapshot.roundNumber !== undefined && <span>Round {asNumber(snapshot.roundNumber)}{snapshot.totalRounds ? `/${snapshot.totalRounds}` : ""}</span>}{snapshot.matchEndsAt && <span>Time {formatSeconds(matchRemainingMs)}</span>}</div></li>;
+    return <li key={actorId || index} className={`rounded-sm border border-white/10 bg-white/[0.025] px-3 py-3 ${stats.eliminated === true || stats.connected === false || entry.connected === false ? "opacity-45 grayscale" : ""}`}><div className="flex items-center gap-3"><span className={`grid size-8 shrink-0 place-items-center rounded-sm text-xs font-black ${index === 0 ? "bg-[var(--accent-highlight)] text-[#201b3b]" : "bg-white/10 text-white"}`}>{asNumber(entry.rank, index + 1)}</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold text-white">{asText(entry.nickname, "Player")}</p><p className="text-[10px] text-[var(--text-muted)]">{stats.eliminated === true ? "Eliminated" : stats.connected === false ? "Disconnected" : asText(snapshot.status) === "FINISHED" ? "Match finished" : asText(snapshot.phase) === "QUESTION" || asText(snapshot.phase) === "REVEAL" ? entry.answered === true || stats.answered === true ? "Answered" : "Choosing…" : "In match"}</p></div><strong className="text-sm tabular-nums text-[var(--accent-highlight)]">{asNumber(entry.score)}</strong></div><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 pl-11 text-[10px] text-[var(--text-muted)]">{mode.includes("HP") && <span>HP {asNumber(entry.hp, asNumber(stats.finalHp, 0))}</span>}{mode.includes("STREAK") && <span>Streak {asNumber(entry.streak, asNumber(stats.maxStreak, 0))}</span>}{(entry.roundNumber !== undefined || snapshot.roundNumber !== undefined) && <span>Round {asNumber(entry.roundNumber, asNumber(snapshot.roundNumber))}{snapshot.totalRounds ? `/${snapshot.totalRounds}` : ""}</span>}{snapshot.matchEndsAt && <span>Time {formatSeconds(matchRemainingMs)}</span>}</div></li>;
   })}</ol>{entries.length === 0 && <div className="rounded-sm border border-dashed border-white/15 p-5 text-center text-xs text-[var(--text-muted)]"><Users className="mx-auto mb-2" size={17} />Scores will appear once play begins.</div>}<p className="mt-4 border-t border-white/10 pt-3 text-[10px] leading-4 text-[var(--text-muted)]">{isSpectator ? "Read-only score and mode stats. No questions or answers are sent to spectators." : "Scores update after each shared reveal or as players progress through Score Race."}</p></aside>;
 }
 

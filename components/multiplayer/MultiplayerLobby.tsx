@@ -27,9 +27,18 @@ const ROOM_MODES: ReadonlyArray<{ id: RoomMode; label: string; description: stri
 
 const inputClass = "w-full rounded-sm border border-white/25 bg-[#15122b] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-[var(--focus-ring)] focus:ring-2 focus:ring-[var(--focus-ring)]/30";
 
+const NICKNAME_KEY = "higher-lower:nickname:v1";
+
 export default function MultiplayerLobby() {
   const router = useRouter();
-  const [nickname, setNickname] = useState("");
+  const [nickname, setNickname] = useState(() => {
+    if (typeof window === "undefined") return "";
+    try { return window.localStorage.getItem(NICKNAME_KEY) ?? ""; } catch { return ""; }
+  });
+
+  useEffect(() => {
+    try { window.localStorage.setItem(NICKNAME_KEY, nickname.trim()); } catch { /* storage may be blocked */ }
+  }, [nickname]);
   const [roomCode, setRoomCode] = useState("");
   const [mode, setMode] = useState<RoomMode>("PVP_SPEED");
   const [categories, setCategories] = useState<CategorySummary[]>([]);
