@@ -1,5 +1,7 @@
 import { io, type Socket } from "socket.io-client";
 
+import { getDeviceId } from "@/lib/device";
+
 export interface RoomCredential {
   sessionId: string;
   roomCode: string;
@@ -174,7 +176,7 @@ export async function createSpectatorCredential(code: string, nickname: string):
   const response = await fetch("/api/backend/rooms/spectate", {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ code, nickname }),
+    body: JSON.stringify({ code, nickname, deviceId: getDeviceId() }),
     cache: "no-store",
     signal: AbortSignal.timeout(15_000),
   });

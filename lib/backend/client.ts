@@ -21,6 +21,8 @@ const DEPLOYED_API_BASE_URL = "https://higherorlower-api.onrender.com/api/v1";
 const CATEGORIES_REQUEST_TIMEOUT_MS = 15_000;
 
 /** The handoff documents the deployed endpoint; local API URLs are caller-configured. */
+import { getDeviceId } from "@/lib/device";
+
 export function getApiBaseUrl(): string {
   const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
   const baseUrl = configured || DEPLOYED_API_BASE_URL;
@@ -346,7 +348,7 @@ export function createRoom(input: CreateRoomRequest): Promise<RoomCredentialResp
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...input, playsetId: input.playsetId.trim(), nickname }),
+      body: JSON.stringify({ ...input, playsetId: input.playsetId.trim(), nickname, deviceId: getDeviceId() }),
     },
     parseRoomCredential,
   );
@@ -364,7 +366,7 @@ export function joinRoom(input: JoinRoomRequest): Promise<RoomCredentialResponse
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code, nickname }),
+      body: JSON.stringify({ code, nickname, deviceId: getDeviceId() }),
     },
     parseRoomCredential,
   );
