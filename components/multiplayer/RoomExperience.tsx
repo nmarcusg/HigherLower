@@ -359,7 +359,21 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
             <section className={CARD}>
               <div className="mb-6 flex flex-wrap items-center justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-action-higher)]">{isSpectator ? "Live leaderboard" : isScoreRace ? "Race clock" : `Round ${currentRound}${totalRounds ? ` of ${totalRounds}` : ""}`}</p><h2 className="mt-1 text-2xl font-bold">{phaseLabel(phase)}</h2></div><div className="flex items-center gap-3">{mode.includes("HP") && !isSpectator && <div className="min-w-32"><div className="mb-1 flex justify-between text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]"><span>Health</span><span>{hp}/100</span></div><div className="h-2 overflow-hidden rounded-full border border-white/20 bg-white/10"><div className="h-full bg-[var(--status-success)] transition-[width] duration-300" style={{ width: `${hp}%` }} /></div></div>}<div className="rounded-sm border border-white/20 bg-white/[0.04] px-4 py-2 text-lg font-bold tabular-nums text-[var(--accent-highlight)]">{formatSeconds(remainingMs)}</div></div></div>
               {isSpectator ? (
-                <div className="rounded-sm border border-dashed border-white/20 bg-white/[0.02] p-6 text-center"><Trophy className="mx-auto mb-3 text-[var(--accent-highlight)]" size={24} /><h3 className="text-lg font-bold">Watching the match</h3><p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">Spectators see scores and mode stats only. Questions and answers stay hidden.</p></div>
+                question.id ? (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <QuestionCard item={left} label="Current" revealed />
+                      <QuestionCard item={right} label="Next" revealed={revealed} />
+                    </div>
+                    {revealed ? (
+                      <div className="mt-5 rounded-sm border border-[var(--accent-highlight)]/30 bg-[var(--accent-highlight)]/10 p-4 text-center"><p className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--accent-highlight)]">{question.correctChoice ? `Correct answer: ${question.correctChoice}` : "Answer revealed"}</p><p className="mt-1 text-sm text-white">{asText(right.displayValue, "The comparison has been revealed")}</p></div>
+                    ) : (
+                      <p className="mt-4 text-center text-[11px] leading-5 text-[var(--text-muted)]">Watching live. The next value and the correct answer appear at the round reveal.</p>
+                    )}
+                  </>
+                ) : (
+                  <div className="rounded-sm border border-dashed border-white/20 bg-white/[0.02] p-6 text-center"><Trophy className="mx-auto mb-3 text-[var(--accent-highlight)]" size={24} /><h3 className="text-lg font-bold">Watching the match</h3><p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">The next question appears as soon as the round opens.</p></div>
+                )
               ) : (
                 <>
                   {phase === "COUNTDOWN" && <div className="grid min-h-52 place-items-center rounded-sm border border-white/15 bg-white/[0.03] text-center"><div><p className="text-7xl font-black tabular-nums text-white">{formatSeconds(remainingMs)}</p><p className="mt-2 text-xs uppercase tracking-[0.15em] text-[var(--text-muted)]">Get ready</p></div></div>}
