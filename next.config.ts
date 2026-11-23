@@ -39,6 +39,23 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "shared.fastly.steamstatic.com",
       },
+      // Backend-owned catalog imagery used by multiplayer cards.
+      {
+        protocol: "https",
+        hostname: "images.igdb.com",
+      },
+      {
+        protocol: "https",
+        hostname: "yt3.ggpht.com",
+      },
+      {
+        protocol: "https",
+        hostname: "static-cdn.jtvnw.net",
+      },
+      {
+        protocol: "https",
+        hostname: "archive.org",
+      },
     ],
 
     // Allow SVG images (e.g. flag SVGs from flagcdn / wikimedia)
