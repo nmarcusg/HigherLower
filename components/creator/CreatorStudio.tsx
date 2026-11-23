@@ -35,7 +35,7 @@ import {
 } from "@/lib/backend/creator";
 
 type EditorMode = "create" | "edit";
-type ItemDraft = { id?: string; name: string; value: string; sourceLabel: string };
+type ItemDraft = { id?: string; name: string; value: string; sourceLabel: string; imageUrl: string };
 type Template = {
   label: string;
   title: string;
@@ -123,7 +123,7 @@ const TEMPLATES: Template[] = [
 ];
 
 function blankRows(count = 5): ItemDraft[] {
-  return Array.from({ length: count }, () => ({ name: "", value: "", sourceLabel: "" }));
+  return Array.from({ length: count }, () => ({ name: "", value: "", sourceLabel: "", imageUrl: "" }));
 }
 
 function statusLabel(status: string) {
@@ -198,6 +198,7 @@ export default function CreatorStudio() {
     if (!title.trim()) next.push("Add a title.");
     if (title.trim().length > 100) next.push("Keep the title under 100 characters.");
     if (description.length > 500) next.push("Keep the description under 500 characters.");
+    if (items.some((item) => item.imageUrl.trim() && !item.imageUrl.trim().startsWith("https://"))) next.push("Image URLs must start with https://.");
     if (!metricName.trim()) next.push("Name the value being compared.");
     if (metricName.trim().length > 60) next.push("Keep the metric name under 60 characters.");
     if (!metricUnit.trim()) next.push("Add a unit such as people, USD, or points.");
@@ -212,7 +213,7 @@ export default function CreatorStudio() {
       if (item.value && Number.isFinite(Number(item.value)) && Math.abs(Number(item.value)) >= 1e24) next.push(`Row ${index + 1}: keep values below 1e24.`);
     });
     return next;
-  }, [completedRows, description, metricName, metricUnit, title]);
+  }, [completedRows, description, items, metricName, metricUnit, title]);
 
   const canSaveDraft = issues.length === 0;
   const canPublish = canSaveDraft && distinctCount >= 2;
@@ -236,13 +237,13 @@ export default function CreatorStudio() {
     setError("");
   }
 
-  function updateItem(index: number, field: "name" | "value" | "sourceLabel", value: string) {
+  function updateItem(index: number, field: "name" | "value" | "sourceLabel" | "imageUrl", value: string) {
     setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item));
   }
 
   function addRow() {
     if (items.length >= 200) return;
-    setItems((current) => [...current, { name: "", value: "", sourceLabel: "" }]);
+    setItems((current) => [...current, { name: "", value: "", sourceLabel: "", imageUrl: "" }]);
   }
 
   function removeRow(index: number) {
@@ -254,7 +255,7 @@ export default function CreatorStudio() {
     setDescription(template.description);
     setMetricName(template.metricName);
     setMetricUnit(template.metricUnit);
-    setItems(template.items.map(([name, value]) => ({ name, value: String(value), sourceLabel: template.sourceLabel })));
+    setItems(template.items.map(([name, value]) => ({ name, value: String(value), sourceLabel: template.sourceLabel, imageUrl: "" })));
     setVisibility("PUBLIC");
     clearFeedback();
     setMessage(`Loaded “${template.label}”. Edit any row, then save.`);
@@ -272,6 +273,7 @@ export default function CreatorStudio() {
         name: item.name,
         value: Number(item.value),
         sourceLabel: item.sourceLabel.trim() || "Manual entry",
+        imageUrl: item.imageUrl.trim() || null,
       })),
     };
   }
@@ -352,6 +354,7 @@ export default function CreatorStudio() {
         name: item.name,
         value: String(item.value),
         sourceLabel: item.sourceLabel,
+        imageUrl: item.imageUrl ?? "",
       })) ?? [];
       setItems(loaded.length > 0 ? loaded : blankRows());
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -385,6 +388,7 @@ export default function CreatorStudio() {
               name: item.name,
               value: item.value,
               sourceLabel: item.sourceLabel,
+              imageUrl: item.imageUrl,
             })),
             expectedRevision: revision,
           });
@@ -543,6 +547,13 @@ export default function CreatorStudio() {
                     <label className="sm:hidden text-[10px] font-bold uppercase text-[var(--text-muted)]">Source note<input className={FIELD} value={item.sourceLabel} maxLength={100} onChange={(event) => updateItem(index, "sourceLabel", event.target.value)} placeholder="World Bank, 2024" /></label>
                     <input className={`${FIELD} hidden sm:block`} value={item.sourceLabel} maxLength={100} onChange={(event) => updateItem(index, "sourceLabel", event.target.value)} placeholder="World Bank, 2024" aria-label={`Row ${index + 1} source note`} />
                     <button type="button" className="mt-1 inline-flex h-10 items-center justify-center text-white/55 hover:text-white disabled:opacity-30" onClick={() => removeRow(index)} disabled={items.length === 1} aria-label={`Remove row ${index + 1}`}><Trash2 size={16} /></button>
+                    <div className="flex items-center gap-2 sm:col-span-full">
+                      <input className={FIELD} value={item.imageUrl} maxLength={500} onChange={(event) => updateItem(index, "imageUrl", event.target.value)} placeholder="https://example.com/image.jpg (optional)" aria-label={`Row ${index + 1} image URL`} />
+                      {item.imageUrl.trim().startsWith("https://") && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={item.imageUrl.trim()} alt="" className="size-11 shrink-0 rounded-sm border border-white/15 object-cover" />
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

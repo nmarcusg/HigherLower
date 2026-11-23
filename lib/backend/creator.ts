@@ -35,6 +35,7 @@ export interface CreatorItemInput {
   name: string;
   value: number;
   displayValue?: string;
+  imageUrl?: string | null;
   sourceLabel: string;
   sourceYear?: number | null;
 }
