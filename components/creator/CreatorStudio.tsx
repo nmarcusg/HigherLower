@@ -207,6 +207,8 @@ export default function CreatorStudio() {
 
   const [deleteTarget, setDeleteTarget] = useState<CreatorPlaysetSummary | null>(null);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [upgradeBusy, setUpgradeBusy] = useState(false);
+  const [upgradeError, setUpgradeError] = useState("");
   const [kofiInfo, setKofiInfo] = useState<{ kofiUrl: string; claimCode: string; amountUsd: number } | null>(null);
   const [copiedClaim, setCopiedClaim] = useState(false);
 
@@ -296,6 +298,57 @@ export default function CreatorStudio() {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [loadWorkspace, token]);
+
+  useEffect(() => {
+    if (!token) return;
+    const params = new URLSearchParams(window.location.search);
+    const upgradeStatus = params.get("upgrade");
+    if (upgradeStatus !== "success" && upgradeStatus !== "cancelled") return;
+
+    let cancelled = false;
+    void (async () => {
+      await Promise.resolve();
+      if (cancelled) return;
+
+      params.delete("upgrade");
+      const nextSearch = params.toString();
+      const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`;
+      window.history.replaceState(null, "", nextUrl);
+
+      if (upgradeStatus === "cancelled") {
+        setMessage("Checkout was cancelled. You can upgrade to Creator Pro anytime.");
+        return;
+      }
+
+      setMessage("Payment received — confirming your Creator Pro unlock…");
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        if (attempt > 0) {
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 2000));
+        }
+        if (cancelled) return;
+        try {
+          const nextProfile = await fetchCreatorProfile(token);
+          if (cancelled) return;
+          setProfile(nextProfile);
+          if (nextProfile.tier === "PRO") {
+            setMessage("Creator Pro unlocked! You now have up to 25 playsets and 200 items per set.");
+            return;
+          }
+        } catch {
+          // Retry until attempts are exhausted.
+        }
+      }
+      if (!cancelled) {
+        setMessage(
+          "Payment received — waiting for the confirmation webhook. Refresh in a moment if Creator Pro has not appeared yet.",
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   async function handleMarkNotificationsRead(ids?: string[]) {
     if (!token) return;
@@ -700,6 +753,8 @@ export default function CreatorStudio() {
   }
 
   async function openUpgradeModal() {
+    setUpgradeError("");
+    setUpgradeBusy(false);
     setUpgradeOpen(true);
     setKofiInfo(null);
     if (token && publicSettings.payments.kofiEnabled) {
@@ -713,14 +768,14 @@ export default function CreatorStudio() {
 
   async function launchXenditCheckout() {
     if (!token) return;
-    setBusy(true);
-    setError("");
+    setUpgradeBusy(true);
+    setUpgradeError("");
     try {
       const { invoiceUrl } = await startXenditUpgrade(token);
       window.location.href = invoiceUrl;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not start Xendit checkout.");
-      setBusy(false);
+      setUpgradeError(err instanceof Error ? err.message : "Could not start Xendit checkout.");
+      setUpgradeBusy(false);
     }
   }
 
@@ -1858,7 +1913,10 @@ export default function CreatorStudio() {
 
       <NativeModalDialog
         open={upgradeOpen}
-        onClose={() => setUpgradeOpen(false)}
+        onClose={() => {
+          setUpgradeOpen(false);
+          setUpgradeError("");
+        }}
         eyebrow="One-Time Creator Unlock"
         title="Upgrade to Creator Pro"
       >
@@ -1871,15 +1929,27 @@ export default function CreatorStudio() {
             <li>• Zero ads across browsing and gameplay while signed in</li>
           </ul>
 
+          {upgradeError && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-sm border border-rose-400/40 bg-rose-950/50 px-3 py-2.5 text-xs text-rose-100"
+            >
+              <CircleAlert size={15} className="mt-0.5 shrink-0 text-rose-300" />
+              <span>{upgradeError}</span>
+            </div>
+          )}
+
           {publicSettings.payments.xenditEnabled && (
             <button
               type="button"
-              disabled={busy}
+              disabled={upgradeBusy}
               onClick={() => void launchXenditCheckout()}
               className="flex min-h-11 w-full items-center justify-center gap-2 rounded-sm bg-[var(--accent-highlight)] px-4 text-xs font-bold uppercase tracking-[0.1em] text-[#15122b] hover:brightness-110 disabled:opacity-50"
             >
               <Crown size={15} />
-              Unlock via GCash / Maya / Card (₱{publicSettings.payments.pricePhp})
+              {upgradeBusy
+                ? "Redirecting to Xendit…"
+                : `Unlock via GCash / Maya / Card (₱${publicSettings.payments.pricePhp})`}
             </button>
           )}
 
