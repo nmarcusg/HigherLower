@@ -325,10 +325,15 @@ export function getSoloResults(sessionId: string, gameToken: string): Promise<So
   }, parseSoloResults);
 }
 
-export function fetchPublicPlaysets(options: { limit?: number; offset?: number; signal?: AbortSignal } = {}): Promise<PublicPlaysetPage> {
+export function fetchPublicPlaysets(
+  options: { limit?: number; offset?: number; q?: string; kind?: "all" | "system" | "custom"; signal?: AbortSignal } = {},
+): Promise<PublicPlaysetPage> {
   const params = new URLSearchParams();
   if (options.limit !== undefined) params.set("limit", String(options.limit));
   if (options.offset !== undefined) params.set("offset", String(options.offset));
+  const trimmedQ = options.q?.trim();
+  if (trimmedQ) params.set("q", trimmedQ);
+  if (options.kind && options.kind !== "all") params.set("kind", options.kind);
   const query = params.size ? `?${params.toString()}` : "";
   if (typeof window !== "undefined") {
     const cached = cachedPlaysetPages.get(query);

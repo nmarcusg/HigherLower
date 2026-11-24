@@ -39,6 +39,10 @@ import {
 } from "@/lib/api/musicbrainz";
 
 export async function GET(req: NextRequest) {
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
   const { searchParams } = req.nextUrl;
   const category = searchParams.get("category");
   const full = searchParams.get("full") === "1";
@@ -71,13 +75,6 @@ export async function GET(req: NextRequest) {
     // adapter (not the snapshot-backed gameplay path) so the snapshot can be
     // regenerated from the authoritative provider.
     if (full) {
-      // Dev-only guard: never run the live crawl in a production build.
-      if (process.env.NODE_ENV === "production") {
-        return NextResponse.json(
-          { error: "?full=1 is dev-only and is disabled in production" },
-          { status: 404 },
-        );
-      }
       const items =
         category === "album-release-dates"
           ? await fetchAlbumReleaseDatesLive()

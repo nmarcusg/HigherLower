@@ -5,7 +5,7 @@ const API_BASE_URL =
 export async function GET(request: Request) {
   const incomingUrl = new URL(request.url);
   const query = new URLSearchParams();
-  for (const key of ["limit", "offset"]) {
+  for (const key of ["limit", "offset", "q", "kind"]) {
     const value = incomingUrl.searchParams.get(key);
     if (value !== null) query.set(key, value);
   }

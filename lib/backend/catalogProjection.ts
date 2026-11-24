@@ -52,15 +52,6 @@ export function backendCategoryFor(
   return catalog.categories.find((category) => category.id === backendId) ?? null;
 }
 
-/**
- * The owner approved using the existing checked-in Monthly Listeners snapshot
- * while fresh Metrika data waits for its quota reset. This stays deliberately
- * narrow; no other unavailable backend category is made playable by the UI.
- */
-function canUseTemporarySnapshot(category: CategorySummary): boolean {
-  return category.id === "music-monthly-listeners";
-}
-
 export function projectBackendCatalog(
   catalog: CategoryPage,
 ): ProductionCatalogProjection {
@@ -71,9 +62,7 @@ export function projectBackendCatalog(
         .filter((category) => category.domainId === domain.id)
         .map((category): PublicProductionCategory => {
           const backend = backendCategoryFor(category.id, catalog);
-          const playable = Boolean(
-            backend && (backend.playable || canUseTemporarySnapshot(backend)),
-          );
+          const playable = Boolean(backend?.playable);
           return {
             id: category.id,
             domainId: category.domainId,

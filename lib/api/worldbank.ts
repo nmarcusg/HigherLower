@@ -19,13 +19,6 @@ import { GameItem, ApiFetchError } from "@/types/api";
 
 // ─── Raw API types ────────────────────────────────────────────────────────────
 
-interface WorldBankMeta {
-  page: number;
-  pages: number;
-  per_page: number;
-  total: number;
-}
-
 interface WorldBankRecord {
   country: { id: string; value: string };
   countryiso3code: string;

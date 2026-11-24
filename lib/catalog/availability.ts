@@ -75,18 +75,6 @@ export interface CategoryAvailability {
 }
 
 /**
- * Build a gate record where every gate is explicitly not satisfied. Used for
- * categories with no recorded runtime evidence; the evidence note makes the
- * absence auditable instead of implying a pass.
- */
-function unverifiedGates(note: string): CategoryGateRecord {
-  return RELEASE_GATE_IDS.reduce((record, gateId) => {
-    record[gateId] = { satisfied: false, evidence: note };
-    return record;
-  }, {} as CategoryGateRecord);
-}
-
-/**
  * A category is production-playable only when every release gate is satisfied.
  * This keeps promotion evidence-driven and reversible: revoking any gate
  * automatically hides the category without changing its semantic identity.

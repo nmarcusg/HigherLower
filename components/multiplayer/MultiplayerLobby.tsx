@@ -75,27 +75,63 @@ export default function MultiplayerLobby() {
 
   useEffect(() => {
     const saved = readRoomCredential();
-    Promise.resolve().then(() => setRecentRoom(Boolean(saved)));
+    const requestedPlayset =
+      new URLSearchParams(window.location.search).get("playset")?.trim() || "";
+    queueMicrotask(() => {
+      setRecentRoom(Boolean(saved));
+      if (requestedPlayset) setPlaysetId(requestedPlayset);
+    });
     const controller = new AbortController();
     Promise.allSettled([
       fetchCategories({ signal: controller.signal }),
       fetchPublicPlaysets({ limit: 50, signal: controller.signal }),
     ]).then(([categoryResult, playsetResult]) => {
+      const available = categoryResult.status === "fulfilled"
+        ? categoryResult.value.categories.filter((category) => category.playable && category.playsetId)
+        : [];
+      const fetchedPlaysets = playsetResult.status === "fulfilled"
+        ? playsetResult.value.playsets
+        : [];
+
       if (categoryResult.status === "fulfilled") {
-        const available = categoryResult.value.categories.filter(
-          (category) => category.playable && category.playsetId,
-        );
         setCategories(categoryResult.value.categories);
         setPlaysetId((current) => current || available[0]?.playsetId || "");
       }
       if (playsetResult.status === "fulfilled") {
-        setCustomPlaysets(playsetResult.value.playsets);
-        if (categoryResult.status !== "fulfilled" && playsetResult.value.playsets.length > 0) {
-          setPlaysetId((current) => current || playsetResult.value.playsets[0].id);
+        setCustomPlaysets(fetchedPlaysets);
+        if (categoryResult.status !== "fulfilled" && fetchedPlaysets.length > 0) {
+          setPlaysetId((current) => current || fetchedPlaysets[0].id);
         }
       }
       if (categoryResult.status === "rejected" && playsetResult.status === "rejected") {
         setStatus("The game service is waking up. Try again in a moment.");
+      }
+
+      if (requestedPlayset) {
+        const alreadyKnown =
+          available.some((category) => category.playsetId === requestedPlayset) ||
+          fetchedPlaysets.some((playset) => playset.id === requestedPlayset);
+        if (!alreadyKnown) {
+          void fetchPublicPlayset(requestedPlayset, { signal: controller.signal })
+            .then((playset) => {
+              if (controller.signal.aborted) return;
+              setCustomPlaysets((current) => current.some((item) => item.id === playset.id)
+                ? current
+                : [...current, {
+                    id: playset.id,
+                    title: playset.title,
+                    description: playset.description,
+                    metricName: playset.metricName,
+                    metricUnit: playset.metricUnit,
+                    itemCount: playset.itemCount,
+                    revision: playset.revision,
+                  }]);
+              setPlaysetId(playset.id);
+            })
+            .catch(() => {
+              // Keep the requested ID as-is or let normal picker validation surface missing sets.
+            });
+        }
       }
     }).finally(() => {
       if (!controller.signal.aborted) setCatalogLoading(false);
