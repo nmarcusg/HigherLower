@@ -1,16 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Database, Play, Trash2, UserPlus } from "lucide-react";
+import { Database, Mail, Play, Search, Trash2, UserPlus, X } from "lucide-react";
 import { useAdminAuth } from "@/components/admin/AdminShell";
 import AdminTable from "@/components/admin/AdminTable";
 import {
+  fetchAdminCreators,
   fetchAdminStaff,
   fetchAdminSystem,
   grantAdminStaff,
   revokeAdminStaff,
+  revokeAdminStaffInvite,
   runAdminRetentionCleanup,
   triggerAdminRollup,
+  type AdminCreatorSummary,
+  type AdminStaffInvite,
   type StaffRole,
 } from "@/lib/backend/admin";
 
@@ -18,16 +22,34 @@ type SystemData = Awaited<ReturnType<typeof fetchAdminSystem>>;
 type StaffData = Awaited<ReturnType<typeof fetchAdminStaff>>;
 type CleanupPreview = Awaited<ReturnType<typeof runAdminRetentionCleanup>>;
 
+function roleBadgeClass(role: StaffRole): string {
+  if (role === "SUPERADMIN") {
+    return "border border-[var(--accent-highlight)]/45 bg-[var(--accent-highlight)]/15 text-[var(--accent-highlight)]";
+  }
+  if (role === "ADMIN") {
+    return "bg-white/10 text-[var(--accent-action-higher)]";
+  }
+  return "bg-white/10 text-[var(--text-secondary)]";
+}
+
 export default function AdminSystemStaffPage() {
   const { token, identity } = useAdminAuth();
   const [sys, setSys] = useState<SystemData | null>(null);
   const [staff, setStaff] = useState<StaffData["staff"]>([]);
+  const [invites, setInvites] = useState<AdminStaffInvite[]>([]);
   const [cleanupDays, setCleanupDays] = useState("30");
   const [cleanupPreview, setCleanupPreview] = useState<CleanupPreview | null>(null);
 
-  const [newUserId, setNewUserId] = useState("");
-  const [newRole, setNewRole] = useState<StaffRole>("MODERATOR");
   const [newEmail, setNewEmail] = useState("");
+  const [newProvider, setNewProvider] = useState<"" | "google" | "discord">("");
+  const [newRole, setNewRole] = useState<StaffRole>("MODERATOR");
+  const [newUserId, setNewUserId] = useState("");
+  const [showManualUuid, setShowManualUuid] = useState(false);
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<AdminCreatorSummary[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [selectedCreator, setSelectedCreator] = useState<AdminCreatorSummary | null>(null);
 
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -42,6 +64,7 @@ export default function AdminSystemStaffPage() {
       ]);
       setSys(sysRes);
       setStaff(staffRes.staff);
+      setInvites(staffRes.invites ?? []);
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load system status.");
@@ -51,6 +74,27 @@ export default function AdminSystemStaffPage() {
   useEffect(() => {
     void Promise.resolve().then(() => load());
   }, [load]);
+
+  useEffect(() => {
+    const trimmed = searchQuery.trim();
+    if (identity.role !== "SUPERADMIN" || trimmed.length < 2) return;
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      setSearching(true);
+      try {
+        const res = await fetchAdminCreators(token, { q: trimmed, limit: 6 });
+        if (active) setSearchResults(res.creators);
+      } catch {
+        if (active) setSearchResults([]);
+      } finally {
+        if (active) setSearching(false);
+      }
+    }, 250);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [identity.role, searchQuery, token]);
 
   async function runRollup() {
     setBusy(true);
@@ -89,21 +133,53 @@ export default function AdminSystemStaffPage() {
 
   async function addStaff(event: FormEvent) {
     event.preventDefault();
-    if (!newUserId.trim()) return;
+    const resolvedUserId = selectedCreator?.userId ?? newUserId.trim();
+    const resolvedEmail = (selectedCreator?.email ?? newEmail).trim();
+    if (!resolvedEmail && !resolvedUserId) {
+      setError("Enter an email address, pick an existing user, or specify a Supabase User ID.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
-      await grantAdminStaff(token, {
-        userId: newUserId.trim(),
+      const result = await grantAdminStaff(token, {
+        ...(resolvedUserId ? { userId: resolvedUserId } : {}),
+        ...(resolvedEmail ? { email: resolvedEmail } : {}),
         role: newRole,
-        ...(newEmail.trim() ? { email: newEmail.trim() } : {}),
+        ...(newProvider ? { provider: newProvider } : {}),
       });
       setNewUserId("");
       setNewEmail("");
-      setNotice("Staff access granted.");
+      setNewProvider("");
+      setSelectedCreator(null);
+      setSearchQuery("");
+      setSearchResults([]);
+      if (result.status === "PENDING_INVITE") {
+        setNotice(
+          `Invite queued for ${result.invite.email} (${result.invite.role}). Access unlocks automatically on their first verified sign-in.`,
+        );
+      } else {
+        setNotice(
+          `Granted ${result.role} access to ${result.email ?? result.username ?? result.userId}.`,
+        );
+      }
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not grant staff role.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revokeInvite(inviteId: string, email: string) {
+    setBusy(true);
+    setError("");
+    try {
+      await revokeAdminStaffInvite(token, inviteId, "Cancelled via Admin System console");
+      setNotice(`Cancelled pending invite for ${email}.`);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not cancel invite.");
     } finally {
       setBusy(false);
     }
@@ -249,17 +325,111 @@ export default function AdminSystemStaffPage() {
           className="space-y-4 rounded-md border border-white/15 bg-[#121628] p-5"
         >
           <h2 className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-[var(--text-secondary)]">
-            <UserPlus size={14} /> Grant / Update Staff Role
+            <UserPlus size={14} /> Grant / Invite Staff Member
           </h2>
+
+          {selectedCreator && (
+            <div className="flex items-center justify-between gap-2 rounded border border-emerald-400/40 bg-emerald-950/25 px-3 py-2 text-xs">
+              <div className="min-w-0">
+                <p className="font-bold text-white">
+                  {selectedCreator.displayName}{" "}
+                  <span className="font-normal text-[var(--text-muted)]">
+                    (@{selectedCreator.handle} · {selectedCreator.authProvider.toUpperCase()})
+                  </span>
+                </p>
+                <p className="truncate text-[11px] text-emerald-200">
+                  {selectedCreator.email ?? selectedCreator.userId}
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Clear selected user"
+                onClick={() => {
+                  setSelectedCreator(null);
+                  setNewUserId("");
+                }}
+                className="rounded p-1 text-white/70 hover:bg-white/10 hover:text-white"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )}
+
+          {!selectedCreator && (
+            <div className="space-y-2">
+              <label className="block text-xs text-[var(--text-muted)]">
+                Find Existing User (Discord username, handle, display name, or email)
+                <div className="relative mt-1.5">
+                  <Search
+                    size={13}
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
+                  />
+                  <input
+                    value={searchQuery}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSearchQuery(val);
+                      if (val.trim().length < 2) {
+                        setSearchResults([]);
+                      }
+                    }}
+                    placeholder="Type at least 2 characters to search users…"
+                    className="w-full rounded-sm border border-white/20 bg-[#0b0d17] py-2 pl-8 pr-3 text-sm text-white"
+                  />
+                </div>
+              </label>
+              {searchQuery.trim().length >= 2 && (
+                <div className="max-h-40 overflow-y-auto rounded-sm border border-white/15 bg-[#0b0d17] text-xs">
+                  {searching ? (
+                    <p className="p-2.5 text-[var(--text-muted)]">Searching…</p>
+                  ) : searchResults.length === 0 ? (
+                    <p className="p-2.5 text-[var(--text-muted)]">
+                      No matching users yet — invite them by verified email below.
+                    </p>
+                  ) : (
+                    searchResults.map((c) => (
+                      <button
+                        key={c.userId}
+                        type="button"
+                        onClick={() => {
+                          setSelectedCreator(c);
+                          setNewUserId(c.userId);
+                          if (c.email) setNewEmail(c.email);
+                          setSearchQuery("");
+                          setSearchResults([]);
+                        }}
+                        className="flex w-full items-center justify-between gap-2 border-b border-white/10 px-3 py-2 text-left last:border-b-0 hover:bg-white/5"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold text-white">
+                            {c.displayName}{" "}
+                            <span className="font-normal text-[var(--text-muted)]">@{c.handle}</span>
+                          </p>
+                          <p className="truncate text-[11px] text-[var(--text-secondary)]">
+                            {c.email ?? c.userId}
+                          </p>
+                        </div>
+                        <span className="shrink-0 rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-[var(--accent-action-higher)]">
+                          {c.authProvider}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-xs text-[var(--text-muted)] sm:col-span-2">
-              Supabase User ID
+              Google or Discord Email
               <input
-                required
-                value={newUserId}
-                onChange={(e) => setNewUserId(e.target.value)}
-                placeholder="UUID from Supabase Auth or Denied screen"
-                className="mt-1.5 w-full rounded-sm border border-white/20 bg-[#0b0d17] px-3 py-2 text-sm text-white"
+                type="email"
+                disabled={Boolean(selectedCreator)}
+                value={selectedCreator?.email ?? newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                placeholder="staff@gmail.com (works before their first sign-in)"
+                className="mt-1.5 w-full rounded-sm border border-white/20 bg-[#0b0d17] px-3 py-2 text-sm text-white disabled:opacity-60"
               />
             </label>
             <label className="text-xs text-[var(--text-muted)]">
@@ -275,39 +445,140 @@ export default function AdminSystemStaffPage() {
               </select>
             </label>
             <label className="text-xs text-[var(--text-muted)]">
-              Label / Email (optional)
-              <input
-                type="email"
-                value={newEmail}
-                onChange={(e) => setNewEmail(e.target.value)}
-                placeholder="staff@example.com"
+              Allowed Login Provider
+              <select
+                value={newProvider}
+                onChange={(e) => setNewProvider(e.target.value as "" | "google" | "discord")}
                 className="mt-1.5 w-full rounded-sm border border-white/20 bg-[#0b0d17] px-3 py-2 text-sm text-white"
-              />
+              >
+                <option value="">Any verified (Google / Discord)</option>
+                <option value="google">Google only</option>
+                <option value="discord">Discord only</option>
+              </select>
             </label>
           </div>
+
+          {!selectedCreator && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowManualUuid((v) => !v)}
+                className="text-[11px] font-semibold text-[var(--text-muted)] underline hover:text-white"
+              >
+                {showManualUuid ? "Hide manual User ID field" : "Or enter Supabase User ID manually"}
+              </button>
+              {showManualUuid && (
+                <input
+                  value={newUserId}
+                  onChange={(e) => setNewUserId(e.target.value)}
+                  placeholder="Optional UUID from Supabase Auth or Denied screen"
+                  className="mt-2 w-full rounded-sm border border-white/20 bg-[#0b0d17] px-3 py-2 font-mono text-xs text-white"
+                />
+              )}
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={busy}
-            className="min-h-10 rounded-sm bg-[var(--accent-highlight)] px-4 text-xs font-bold uppercase text-[#15122b]"
+            className="inline-flex min-h-10 items-center gap-2 rounded-sm bg-[var(--accent-highlight)] px-4 text-xs font-bold uppercase text-[#15122b] disabled:opacity-50"
           >
-            Save Staff Member
+            <Mail size={13} /> {selectedCreator || newUserId.trim() ? "Grant Staff Access" : "Grant / Send Invite"}
           </button>
         </form>
       </div>
+
+      {invites.length > 0 && (
+        <AdminTable
+          caption="Pending Email Invites (auto-claimed on first verified login)"
+          rows={invites}
+          rowKey={(inv) => inv.id}
+          rowHeaderLabel="Email"
+          rowHeader={(inv) => (
+            <div>
+              <p className="text-xs font-semibold text-white">{inv.email}</p>
+              {inv.reason && (
+                <p className="text-[11px] font-normal text-[var(--text-muted)]">{inv.reason}</p>
+              )}
+            </div>
+          )}
+          columns={[
+            {
+              key: "role",
+              label: "Role",
+              render: (inv) => (
+                <span className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${roleBadgeClass(inv.role)}`}>
+                  {inv.role}
+                </span>
+              ),
+            },
+            {
+              key: "provider",
+              label: "Provider",
+              render: (inv) => (inv.provider ? inv.provider.toUpperCase() : "Google or Discord"),
+            },
+            {
+              key: "created",
+              label: "Invited",
+              render: (inv) => new Date(inv.createdAt).toLocaleDateString(),
+            },
+            {
+              key: "act",
+              label: "Action",
+              align: "right",
+              render: (inv) => (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void revokeInvite(inv.id, inv.email)}
+                  className="rounded border border-red-400/40 px-2.5 py-1 text-[10px] font-bold uppercase text-red-300 hover:bg-red-950/30"
+                >
+                  Cancel
+                </button>
+              ),
+            },
+          ]}
+        />
+      )}
 
       <AdminTable
         caption="Staff Roster"
         rows={staff}
         rowKey={(s) => s.userId}
-        rowHeaderLabel="User ID"
+        rowHeaderLabel="Staff Member"
         rowHeader={(s) => (
           <div>
-            <p className="font-mono text-xs">{s.userId}</p>
-            <p className="text-[11px] font-normal text-[var(--text-muted)]">{s.email ?? "—"}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs font-semibold text-white">
+                {s.displayName || (s.username ? `@${s.username}` : s.email || s.userId)}
+              </p>
+              {s.username && (
+                <span className="text-[11px] font-normal text-[var(--text-secondary)]">
+                  @{s.username}
+                </span>
+              )}
+              {s.authProvider && (
+                <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-[var(--accent-action-higher)]">
+                  {s.authProvider}
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] font-normal text-[var(--text-secondary)]">
+              {s.email ?? "No verified email synced yet"}
+            </p>
+            <p className="font-mono text-[10px] font-normal text-[var(--text-muted)]">{s.userId}</p>
           </div>
         )}
         columns={[
-          { key: "role", label: "Role", render: (s) => s.role },
+          {
+            key: "role",
+            label: "Role",
+            render: (s) => (
+              <span className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${roleBadgeClass(s.role)}`}>
+                {s.role}
+              </span>
+            ),
+          },
           {
             key: "status",
             label: "Status",

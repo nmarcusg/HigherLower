@@ -17,6 +17,8 @@ export interface AdminIdentity {
   role: StaffRole;
   email: string | null;
   displayName: string | null;
+  username?: string | null;
+  authProvider?: string | null;
 }
 
 export interface AdminDashboardData {
@@ -615,22 +617,68 @@ export const runAdminRetentionCleanup = (token: string, days: number, apply: boo
     deletedVisitors: number;
   }>(token, "system/cleanup", "POST", { days, apply });
 
+export interface AdminStaffMember {
+  userId: string;
+  role: StaffRole;
+  email: string | null;
+  displayName: string | null;
+  username: string | null;
+  authProvider: string | null;
+  grantedBy: string | null;
+  createdAt: string;
+  revokedAt: string | null;
+}
+
+export interface AdminStaffInvite {
+  id: string;
+  email: string;
+  role: StaffRole;
+  provider: string | null;
+  invitedBy: string;
+  reason: string | null;
+  createdAt: string;
+}
+
 export const fetchAdminStaff = (token: string) =>
   adminRequest<{
-    staff: Array<{
-      userId: string;
-      role: StaffRole;
-      email: string | null;
-      grantedBy: string | null;
-      createdAt: string;
-      revokedAt: string | null;
-    }>;
+    staff: AdminStaffMember[];
+    invites: AdminStaffInvite[];
   }>(token, "staff");
 
 export const grantAdminStaff = (
   token: string,
-  body: { userId: string; role: StaffRole; email?: string; reason?: string },
-) => adminRequest(token, "staff", "POST", body);
+  body: {
+    userId?: string;
+    email?: string;
+    role: StaffRole;
+    provider?: "google" | "discord";
+    reason?: string;
+  },
+) =>
+  adminRequest<
+    | {
+        status: "ACTIVE";
+        userId: string;
+        role: StaffRole;
+        email: string | null;
+        displayName: string | null;
+        username: string | null;
+        authProvider: string | null;
+        revokedAt: null;
+      }
+    | {
+        status: "PENDING_INVITE";
+        invite: AdminStaffInvite;
+      }
+  >(token, "staff", "POST", body);
+
+export const revokeAdminStaffInvite = (token: string, inviteId: string, reason?: string) =>
+  adminRequest<{ id: string; email: string; revokedAt: string }>(
+    token,
+    `staff/invites/${encodeURIComponent(inviteId)}`,
+    "DELETE",
+    { reason },
+  );
 
 export const revokeAdminStaff = (token: string, userId: string, reason?: string) =>
   adminRequest(token, `staff/${encodeURIComponent(userId)}`, "DELETE", { reason });
