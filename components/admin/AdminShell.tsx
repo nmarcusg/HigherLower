@@ -284,7 +284,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
 
   return (
     <AdminContext.Provider value={{ token: sessionToken, identity }}>
-      <div className="min-h-dvh bg-[#0b0d17] text-white lg:grid lg:grid-cols-[248px_minmax(0,1fr)]">
+      <div className="min-h-dvh bg-[#0b0d17] text-white lg:grid lg:grid-cols-[272px_minmax(0,1fr)]">
         {/* Desktop Sidebar */}
         <aside className="hidden border-r border-white/10 bg-[#101322] lg:flex lg:flex-col lg:justify-between">
           <div>

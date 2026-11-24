@@ -15,5 +15,9 @@ export const metadata: Metadata = {
 };
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
-  return <AdminShell>{children}</AdminShell>;
+  return (
+    <div className="admin-console">
+      <AdminShell>{children}</AdminShell>
+    </div>
+  );
 }
