@@ -6,6 +6,7 @@ import { ArrowLeft, Layers3, Play, Sparkles, Timer, Users } from "lucide-react";
 import BackendSoloGame from "@/components/game/BackendSoloGame";
 import ReportPlaysetDialog from "@/components/playsets/ReportPlaysetDialog";
 import { fetchPublicPlayset } from "@/lib/backend/client";
+import { decimalPrecisionLabel, formatPlaysetDisplayValue } from "@/lib/playsets/format";
 import { getSiteUrl, serializeJsonLd, truncateMetaDescription } from "@/lib/seo/site";
 
 const loadPublicPlayset = cache((id: string) => fetchPublicPlayset(id));
@@ -176,9 +177,20 @@ export default async function PublicPlaysetGamePage({
         <section className="mx-auto w-full max-w-4xl flex-1 py-10 sm:py-14">
           <div className="rounded-md border border-white/20 bg-[#1b1734]/90 p-6 shadow-[0_8px_0_var(--accent-classic)] sm:p-8">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-action-higher)]">
-                {playset.itemCount} items · {playset.metricName} ({playset.metricUnit})
-              </p>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-action-higher)]">
+                  {playset.itemCount} items · {playset.metricName} ({playset.metricUnit})
+                </p>
+                {!builtIn && (
+                  <span className="rounded-sm border border-white/15 bg-white/[0.04] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]">
+                    Display format:{" "}
+                    <strong className="text-[var(--accent-highlight)]">
+                      {formatPlaysetDisplayValue(1234.56, playset.metricUnit, playset.decimalPlaces ?? null)}
+                    </strong>{" "}
+                    ({decimalPrecisionLabel(playset.decimalPlaces)})
+                  </span>
+                )}
+              </div>
               {playset.creator && (
                 <span className="inline-flex items-center gap-1.5 rounded-sm border border-white/15 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
                   @{playset.creator.handle}

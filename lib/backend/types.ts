@@ -103,6 +103,7 @@ export interface PublicPlaysetSummary {
   description: string;
   metricName: string;
   metricUnit: string;
+  decimalPlaces?: number | null;
   itemCount: number;
   revision: number;
   updatedAt?: string;

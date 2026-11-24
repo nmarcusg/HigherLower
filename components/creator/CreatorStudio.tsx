@@ -50,6 +50,7 @@ import {
 } from "@/lib/backend/creator";
 import GoogleSignInButton from "@/components/auth/GoogleSignInButton";
 import { DEFAULT_PUBLIC_SETTINGS, fetchPublicSettings, type PublicSettings } from "@/lib/backend/publicSettings";
+import { DECIMAL_PRECISION_OPTIONS, formatPlaysetDisplayValue } from "@/lib/playsets/format";
 import NativeModalDialog from "@/components/ui/NativeModalDialog";
 
 type EditorMode = "create" | "edit";
@@ -200,6 +201,7 @@ export default function CreatorStudio() {
   const [description, setDescription] = useState("");
   const [metricName, setMetricName] = useState("Score");
   const [metricUnit, setMetricUnit] = useState("points");
+  const [decimalPlaces, setDecimalPlaces] = useState<number | null>(null);
   const [visibility, setVisibility] = useState<PlaysetVisibility>("PUBLIC");
   const [items, setItems] = useState<ItemDraft[]>(blankRows);
 
@@ -232,6 +234,7 @@ export default function CreatorStudio() {
     setDescription("");
     setMetricName("Score");
     setMetricUnit("points");
+    setDecimalPlaces(null);
     setVisibility("PUBLIC");
     setItems(blankRows());
     setMessage("");
@@ -477,6 +480,7 @@ export default function CreatorStudio() {
     setDescription(template.description);
     setMetricName(template.metricName);
     setMetricUnit(template.metricUnit);
+    setDecimalPlaces(0);
     setItems(
       template.items.map(([name, value]) => ({
         name,
@@ -497,6 +501,7 @@ export default function CreatorStudio() {
       description: description.trim(),
       metricName: metricName.trim(),
       metricUnit: metricUnit.trim(),
+      decimalPlaces,
       visibility: nextVisibility,
       items: completedRows.map((item) => ({
         ...(item.id ? { id: item.id } : {}),
@@ -525,6 +530,7 @@ export default function CreatorStudio() {
       setDescription(playset.description);
       setMetricName(playset.metricName);
       setMetricUnit(playset.metricUnit);
+      setDecimalPlaces(typeof playset.decimalPlaces === "number" ? playset.decimalPlaces : null);
       setVisibility(playset.visibility);
       const loaded: ItemDraft[] =
         playset.items?.map((item) => ({
@@ -632,6 +638,7 @@ export default function CreatorStudio() {
             description: detail.description,
             metricName: detail.metricName,
             metricUnit: detail.metricUnit,
+            decimalPlaces: detail.decimalPlaces ?? null,
             visibility: "PUBLIC",
             items: (detail.items ?? []).map((item) => ({
               id: item.id,
@@ -1190,8 +1197,8 @@ export default function CreatorStudio() {
           )}
 
           <fieldset disabled={readOnly || busy} className="mt-7">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className={`${LABEL} sm:col-span-2`}>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <label className={`${LABEL} sm:col-span-3`}>
                 Title{" "}
                 <span className="normal-case tracking-normal text-[var(--text-muted)]">
                   3–100 characters
@@ -1204,7 +1211,7 @@ export default function CreatorStudio() {
                   placeholder="e.g. Countries by Population"
                 />
               </label>
-              <label className={`${LABEL} sm:col-span-2`}>
+              <label className={`${LABEL} sm:col-span-3`}>
                 Description{" "}
                 <span className="normal-case tracking-normal text-[var(--text-muted)]">
                   optional, up to 500 characters
@@ -1236,9 +1243,42 @@ export default function CreatorStudio() {
                   value={metricUnit}
                   maxLength={60}
                   onChange={(event) => setMetricUnit(event.target.value)}
-                  placeholder="people"
+                  placeholder="people, mm, USD, %"
                 />
               </label>
+              <label className={LABEL}>
+                Decimal precision{" "}
+                <span className="normal-case tracking-normal text-[var(--text-muted)]">display</span>
+                <select
+                  className={FIELD}
+                  value={decimalPlaces === null ? "" : String(decimalPlaces)}
+                  onChange={(event) => {
+                    const raw = event.target.value;
+                    setDecimalPlaces(raw === "" ? null : Number(raw));
+                  }}
+                >
+                  {DECIMAL_PRECISION_OPTIONS.map((option) => (
+                    <option key={option.value || "auto"} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-sm border border-white/15 bg-black/20 px-3.5 py-2.5 text-xs">
+              <span className="text-[var(--text-muted)]">
+                Gameplay display preview ({metricName.trim() || "Value"}):
+              </span>
+              <strong className="font-bold text-[var(--accent-highlight)]">
+                {formatPlaysetDisplayValue(
+                  items
+                    .map((row) => row.value.trim())
+                    .find((v) => v.length > 0 && Number.isFinite(Number(v))) ?? "1234.56",
+                  metricUnit,
+                  decimalPlaces,
+                )}
+              </strong>
             </div>
 
             <div className="mt-7">
@@ -1438,6 +1478,15 @@ export default function CreatorStudio() {
                         >
                           <CircleAlert size={12} aria-hidden="true" />
                           {item.uploadError}
+                        </span>
+                      )}
+
+                      {item.value.trim().length > 0 && Number.isFinite(Number(item.value.trim())) && (
+                        <span className="ml-auto inline-flex items-center rounded-sm border border-white/15 bg-white/[0.04] px-2 py-1 text-[11px] text-[var(--text-secondary)]">
+                          Displays as:{" "}
+                          <strong className="ml-1 text-[var(--accent-highlight)]">
+                            {formatPlaysetDisplayValue(item.value.trim(), metricUnit, decimalPlaces)}
+                          </strong>
                         </span>
                       )}
                     </div>

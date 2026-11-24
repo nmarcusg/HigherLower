@@ -173,7 +173,13 @@ function parseSoloResults(value: unknown): SoloResults {
 function isPublicPlaysetSummary(value: unknown): value is PublicPlaysetSummary {
   return isRecord(value) && isString(value.id) && isString(value.title) &&
     isString(value.description) && isString(value.metricName) &&
-    isString(value.metricUnit) && Number.isInteger(value.itemCount) &&
+    isString(value.metricUnit) &&
+    (value.decimalPlaces === undefined ||
+      value.decimalPlaces === null ||
+      (Number.isInteger(value.decimalPlaces) &&
+        (value.decimalPlaces as number) >= 0 &&
+        (value.decimalPlaces as number) <= 6)) &&
+    Number.isInteger(value.itemCount) &&
     Number.isInteger(value.revision) &&
     (value.updatedAt === undefined || isString(value.updatedAt));
 }

@@ -23,6 +23,7 @@ export interface CreatorPlayset {
   description: string;
   metricName: string;
   metricUnit: string;
+  decimalPlaces?: number | null;
   visibility: PlaysetVisibility;
   status: PlaysetStatus;
   moderationState?: ModerationState;
@@ -52,6 +53,7 @@ export interface CreatorPlaysetInput {
   description: string;
   metricName: string;
   metricUnit: string;
+  decimalPlaces?: number | null;
   visibility: PlaysetVisibility;
   items: CreatorItemInput[];
   expectedRevision?: number;
