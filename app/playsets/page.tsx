@@ -50,7 +50,8 @@ export default async function PublicPlaysetsPage({
   }
 
   return (
-    <main className="relative z-10 mx-auto flex min-h-dvh w-full max-w-5xl flex-col px-5 py-6 sm:px-8 sm:py-10">
+    <div className="ui-scale-120">
+      <main className="relative z-10 mx-auto flex min-h-dvh w-full max-w-5xl flex-col px-5 py-6 sm:px-8 sm:py-10">
       <header>
         <Link href="/" className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-[var(--text-secondary)] transition hover:text-white">
           <ArrowLeft size={16} /> Back to game
@@ -83,6 +84,7 @@ export default async function PublicPlaysetsPage({
           <Link href="/terms" className="hover:text-white">Terms</Link>
         </nav>
       </footer>
-    </main>
+      </main>
+    </div>
   );
 }

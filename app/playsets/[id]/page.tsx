@@ -142,7 +142,8 @@ export default async function PublicPlaysetGamePage({
           />
         </>
       )}
-      <main className="relative z-10 mx-auto flex min-h-dvh w-full max-w-5xl flex-col px-5 py-6 sm:px-8 sm:py-10">
+      <div className="ui-scale-120">
+        <main className="relative z-10 mx-auto flex min-h-dvh w-full max-w-5xl flex-col px-5 py-6 sm:px-8 sm:py-10">
         <header className="flex flex-wrap items-center justify-between gap-4">
           <Link
             href="/playsets"
@@ -286,7 +287,8 @@ export default async function PublicPlaysetGamePage({
             <Link href="/terms" className="hover:text-white">Terms</Link>
           </nav>
         </footer>
-      </main>
+        </main>
+      </div>
     </>
   );
 }
