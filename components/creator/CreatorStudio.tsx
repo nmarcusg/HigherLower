@@ -851,6 +851,21 @@ export default function CreatorStudio() {
               Removed by moderation{editingSet.moderationReason ? `: ${editingSet.moderationReason}` : "."} This playset cannot be edited or republished.
             </div>
           )}
+          {editingSet?.moderationState === "HIDDEN" && (
+            <div role="status" className="mt-4 rounded-sm border border-amber-400/40 bg-amber-950/35 p-3 text-xs text-amber-200">
+              Hidden from public discovery by moderation{editingSet.moderationReason ? `: ${editingSet.moderationReason}` : "."} Public links and discovery feeds will not list this playset until restored.
+            </div>
+          )}
+          {!publicSettings.features.creatorPublishEnabled && (
+            <div role="status" className="mt-4 rounded-sm border border-amber-400/40 bg-amber-950/35 p-3 text-xs text-amber-200">
+              Publishing is currently paused by platform administrators. Publishing and republishing are disabled until restored.
+            </div>
+          )}
+          {!publicSettings.features.creatorUploadEnabled && (
+            <div role="status" className="mt-4 rounded-sm border border-amber-400/40 bg-amber-950/35 p-3 text-xs text-amber-200">
+              Image uploads are temporarily disabled by platform administrators.
+            </div>
+          )}
 
           {editorMode === "create" && (
             <div className="mt-7 rounded-sm border border-white/15 bg-white/[0.03] p-4">
@@ -1050,7 +1065,7 @@ export default function CreatorStudio() {
                         <input
                           type="file"
                           accept="image/jpeg,image/png,image/webp"
-                          disabled={item.uploading || readOnly || busy}
+                          disabled={item.uploading || readOnly || busy || !publicSettings.features.creatorUploadEnabled}
                           onChange={(e) => {
                             const f = e.target.files?.[0];
                             e.target.value = "";
@@ -1186,7 +1201,7 @@ export default function CreatorStudio() {
               <button
                 type="button"
                 className={PRIMARY}
-                disabled={busy || !canPublish}
+                disabled={busy || !canPublish || !publicSettings.features.creatorPublishEnabled}
                 onClick={() => void saveAndPublish()}
               >
                 {busy ? <LoaderCircle size={15} className="animate-spin" /> : <Send size={15} />}
@@ -1212,7 +1227,7 @@ export default function CreatorStudio() {
                 <button
                   type="button"
                   className={SECONDARY}
-                  disabled={busy}
+                  disabled={busy || (!publicSettings.features.creatorPublishEnabled && editingSet.status !== "PUBLISHED")}
                   onClick={() => void togglePublished(editingSet)}
                 >
                   {editingSet.status === "PUBLISHED" ? (

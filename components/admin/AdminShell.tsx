@@ -286,7 +286,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
     <AdminContext.Provider value={{ token: sessionToken, identity }}>
       <div className="min-h-dvh bg-[#0b0d17] text-white lg:grid lg:grid-cols-[272px_minmax(0,1fr)]">
         {/* Desktop Sidebar */}
-        <aside className="hidden border-r border-white/10 bg-[#101322] lg:flex lg:flex-col lg:justify-between">
+        <aside className="hidden border-r border-white/10 bg-[#101322] lg:sticky lg:top-0 lg:flex lg:h-dvh lg:flex-col lg:justify-between lg:overflow-y-auto">
           <div>
             <div className="border-b border-white/10 px-5 py-4">
               <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-[var(--accent-highlight)]">

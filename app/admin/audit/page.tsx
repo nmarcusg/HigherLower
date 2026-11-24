@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Search } from "lucide-react";
 import { useAdminAuth } from "@/components/admin/AdminShell";
+import AdminRefreshButton from "@/components/admin/AdminRefreshButton";
 import AdminTable from "@/components/admin/AdminTable";
+import StatusBadge from "@/components/admin/StatusBadge";
 import { fetchAdminAudit } from "@/lib/backend/admin";
 
 type AuditData = Awaited<ReturnType<typeof fetchAdminAudit>>;
@@ -14,9 +16,11 @@ export default function AdminAuditPage() {
   const [targetType, setTargetType] = useState("");
   const [logs, setLogs] = useState<AuditData["logs"]>([]);
   const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
       const res = await fetchAdminAudit(token, {
         action: actionFilter.trim() || undefined,
@@ -27,6 +31,8 @@ export default function AdminAuditPage() {
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load audit log.");
+    } finally {
+      setLoading(false);
     }
   }, [actionFilter, targetType, token]);
 
@@ -41,14 +47,17 @@ export default function AdminAuditPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-wrap items-center justify-between gap-4">
+      <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Immutable Audit Log</h1>
           <p className="mt-1 text-xs text-[var(--text-muted)]">
-            Every moderation decision, account restriction, Pro grant, payment link, and settings change.
+            Every moderation decision, account restriction, Pro grant, payment link, catalog access override, and settings change.
           </p>
         </div>
-        <span className="text-xs text-[var(--text-muted)]">{total} event(s)</span>
+        <div className="flex items-start gap-4">
+          <span className="pt-2 text-xs text-[var(--text-muted)]">{total} event(s)</span>
+          <AdminRefreshButton tabKey="audit" onRefresh={load} />
+        </div>
       </header>
 
       <search>
@@ -75,12 +84,14 @@ export default function AdminAuditPage() {
             >
               <option value="">All</option>
               <option value="playset">playset</option>
+              <option value="category">category</option>
               <option value="creator">creator</option>
               <option value="uploaded_media">uploaded_media</option>
               <option value="payment">payment</option>
               <option value="app_settings">app_settings</option>
               <option value="game_session">game_session</option>
               <option value="staff_member">staff_member</option>
+              <option value="staff_invite">staff_invite</option>
             </select>
           </label>
           <button
@@ -100,6 +111,7 @@ export default function AdminAuditPage() {
 
       <AdminTable
         caption="Staff Actions History"
+        loading={loading}
         rows={logs}
         rowKey={(l) => l.id}
         rowHeaderLabel="Action"
@@ -116,9 +128,10 @@ export default function AdminAuditPage() {
             key: "actor",
             label: "Actor",
             render: (l) => (
-              <span className="font-mono text-[11px]">
-                {l.actorUserId.slice(0, 12)}… ({l.actorRole})
-              </span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-mono text-[11px]">{l.actorUserId.slice(0, 12)}…</span>
+                <StatusBadge value={l.actorRole} />
+              </div>
             ),
           },
           {

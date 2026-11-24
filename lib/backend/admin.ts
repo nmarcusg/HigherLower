@@ -89,6 +89,15 @@ export interface AdminDashboardData {
   };
 }
 
+export interface ModerationQueueOverview {
+  recentPublishedCount: number;
+  openReportsPlaysetsCount: number;
+  openReportsTotalCount: number;
+  autoFlaggedCount: number;
+  unreviewedPublishedCount: number;
+  hiddenOrRemovedCount: number;
+}
+
 export interface ModerationQueueEntry {
   playsetId: string;
   title: string;
@@ -146,6 +155,12 @@ export interface AdminPlaysetDetail {
   publishedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  category?: {
+    id: string;
+    allowStaleOverride: boolean;
+    lastRefreshedAt: string | null;
+    lastRefreshStatus: string;
+  } | null;
   creator: {
     userId: string;
     handle: string;
@@ -202,6 +217,7 @@ export interface AdminCreatorSummary {
   storageBytes: number;
   mediaCount: number;
   activeRestrictions: string[];
+  staffRole?: StaffRole | null;
   proUnlockedAt: string | null;
   createdAt: string;
   lastSeenAt: string;
@@ -215,6 +231,7 @@ export interface AdminCreatorDetail {
     email: string | null;
     authProvider: string;
     tier: "FREE" | "PRO";
+    staffRole?: StaffRole | null;
     maxPlaysets: number;
     maxItemsPerSet: number;
     kofiClaimCode: string;
@@ -352,19 +369,26 @@ export const fetchAdminDashboard = (token: string, days: 7 | 30 = 7) =>
 
 export const fetchModerationQueue = (
   token: string,
-  tab: "reports" | "flagged" | "recent",
+  tab: "recent" | "reports" | "flagged",
   limit = 30,
   offset = 0,
 ) =>
-  adminRequest<{ tab: string; total: number; entries: ModerationQueueEntry[] }>(
-    token,
-    `moderation/queue?tab=${tab}&limit=${limit}&offset=${offset}`,
-  );
+  adminRequest<{
+    tab: string;
+    total: number;
+    overview?: ModerationQueueOverview;
+    entries: ModerationQueueEntry[];
+  }>(token, `moderation/queue?tab=${tab}&limit=${limit}&offset=${offset}`);
 
 export const moderateAdminPlayset = (
   token: string,
   playsetId: string,
-  body: { action: "APPROVE" | "HIDE" | "REMOVE" | "RESTORE"; reason: string; resolveOpenReports?: boolean },
+  body: {
+    action: "APPROVE" | "HIDE" | "REMOVE" | "RESTORE";
+    reason: string;
+    resolveOpenReports?: boolean;
+    allowStaleOverride?: boolean;
+  },
 ) => adminRequest(token, `moderation/playsets/${encodeURIComponent(playsetId)}`, "POST", body);
 
 export const resolveAdminReport = (
@@ -381,13 +405,24 @@ export const blockAdminMedia = (
 
 export const fetchAdminPlaysets = (
   token: string,
-  params: { q?: string; kind?: string; status?: string; moderationState?: string; limit?: number; offset?: number },
+  params: {
+    q?: string;
+    kind?: string;
+    status?: string;
+    moderationState?: string;
+    sortBy?: string;
+    sortDir?: "asc" | "desc";
+    limit?: number;
+    offset?: number;
+  },
 ) => {
   const sp = new URLSearchParams();
   if (params.q) sp.set("q", params.q);
   if (params.kind) sp.set("kind", params.kind);
   if (params.status) sp.set("status", params.status);
   if (params.moderationState) sp.set("moderationState", params.moderationState);
+  if (params.sortBy) sp.set("sortBy", params.sortBy);
+  if (params.sortDir) sp.set("sortDir", params.sortDir);
   sp.set("limit", String(params.limit ?? 30));
   sp.set("offset", String(params.offset ?? 0));
   return adminRequest<{ total: number; playsets: AdminPlaysetSummary[] }>(
@@ -427,6 +462,7 @@ export const fetchAdminClusters = (token: string) =>
         email: string | null;
         authProvider: string;
         tier: "FREE" | "PRO";
+        staffRole?: StaffRole | null;
         activeSlotsUsed: number;
         lastSeenAt: string;
       }>;
@@ -467,6 +503,16 @@ export const liftAdminRestriction = (
     { reason },
   );
 
+export interface AdminPaymentsSummary {
+  totalCount: number;
+  completedCount: number;
+  unmatchedCount: number;
+  pendingCount: number;
+  failedOrRefundedCount: number;
+  adminGrantCount: number;
+  revenueByCurrency: Array<{ currency: string; amountMinor: number; count: number }>;
+}
+
 export const fetchAdminPayments = (
   token: string,
   params: { status?: string; provider?: string; limit?: number; offset?: number } = {},
@@ -476,7 +522,10 @@ export const fetchAdminPayments = (
   if (params.provider) sp.set("provider", params.provider);
   sp.set("limit", String(params.limit ?? 50));
   sp.set("offset", String(params.offset ?? 0));
-  return adminRequest<{ total: number; payments: AdminPaymentRow[] }>(token, `payments?${sp.toString()}`);
+  return adminRequest<{ total: number; summary?: AdminPaymentsSummary; payments: AdminPaymentRow[] }>(
+    token,
+    `payments?${sp.toString()}`,
+  );
 };
 
 export const linkAdminPayment = (
@@ -584,11 +633,20 @@ export const fetchAdminCatalog = (token: string) =>
       refreshSchedule: string;
       ageHours: number | null;
       lastRefreshError: string | null;
+      allowStaleOverride?: boolean;
+      moderationState?: string | null;
+      moderationReason?: string | null;
       compressedImages: number;
       compressedCoveragePct: number;
       freshness: { lastRefreshedAt: string | null; lastRefreshStatus: string };
     }>;
   }>(token, "catalog");
+
+export const updateAdminCatalogAccess = (
+  token: string,
+  categoryId: string,
+  body: { action: "HIDE" | "RESTORE"; allowStaleOverride?: boolean; reason: string },
+) => adminRequest(token, `catalog/${encodeURIComponent(categoryId)}/access`, "POST", body);
 
 export const fetchAdminSystem = (token: string) =>
   adminRequest<{
@@ -624,6 +682,7 @@ export interface AdminStaffMember {
   displayName: string | null;
   username: string | null;
   authProvider: string | null;
+  protected?: boolean;
   grantedBy: string | null;
   createdAt: string;
   revokedAt: string | null;

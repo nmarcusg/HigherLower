@@ -4,7 +4,9 @@ import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Ban, Crown, ShieldOff, Sparkles } from "lucide-react";
 import { useAdminAuth } from "@/components/admin/AdminShell";
+import AdminRefreshButton from "@/components/admin/AdminRefreshButton";
 import AdminTable from "@/components/admin/AdminTable";
+import StatusBadge from "@/components/admin/StatusBadge";
 import {
   fetchAdminCreatorDetail,
   hasMinRole,
@@ -23,6 +25,7 @@ export default function AdminCreatorDetailPage({
   const { id } = use(params);
   const { token, identity } = useAdminAuth();
   const [detail, setDetail] = useState<AdminCreatorDetail | null>(null);
+  const [loading, setLoading] = useState(true);
   const [reason, setReason] = useState("");
   const [maxSets, setMaxSets] = useState("25");
   const [maxItems, setMaxItems] = useState("200");
@@ -32,6 +35,7 @@ export default function AdminCreatorDetailPage({
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
       const res = await fetchAdminCreatorDetail(token, id);
       setDetail(res);
@@ -40,6 +44,8 @@ export default function AdminCreatorDetailPage({
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load creator details.");
+    } finally {
+      setLoading(false);
     }
   }, [id, token]);
 
@@ -127,12 +133,15 @@ export default function AdminCreatorDetailPage({
 
   return (
     <div className="space-y-6">
-      <Link
-        href="/admin/creators"
-        className="inline-flex items-center gap-1.5 text-xs font-bold uppercase text-[var(--text-secondary)] hover:text-white"
-      >
-        <ArrowLeft size={14} /> Back to creators
-      </Link>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <Link
+          href="/admin/creators"
+          className="inline-flex items-center gap-1.5 text-xs font-bold uppercase text-[var(--text-secondary)] hover:text-white"
+        >
+          <ArrowLeft size={14} /> Back to creators
+        </Link>
+        <AdminRefreshButton tabKey={`creator:${id}`} onRefresh={load} />
+      </div>
 
       {error && (
         <div role="alert" className="rounded-sm border border-red-400/40 bg-red-950/30 p-3 text-xs text-red-200">
@@ -145,23 +154,30 @@ export default function AdminCreatorDetailPage({
         </div>
       )}
 
+      {!detail && loading && (
+        <div className="h-44 animate-pulse rounded-md border border-white/10 bg-[#121628]" />
+      )}
+
       {detail && (
         <>
-          <section className="rounded-md border border-white/15 bg-[#121628] p-6 space-y-4">
+          <section className="space-y-4 rounded-md border border-white/15 bg-[#121628] p-6">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <h1 className="text-2xl font-bold">
-                  @{detail.profile.handle}{" "}
-                  <span className="text-sm font-normal text-[var(--text-muted)]">
-                    ({detail.profile.displayName})
-                  </span>
-                </h1>
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <h1 className="text-2xl font-bold">
+                    @{detail.profile.handle}{" "}
+                    <span className="text-sm font-normal text-[var(--text-muted)]">
+                      ({detail.profile.displayName})
+                    </span>
+                  </h1>
+                  <StatusBadge value={detail.profile.tier} />
+                  {detail.profile.staffRole && <StatusBadge value={detail.profile.staffRole} />}
+                </div>
                 <p className="mt-1 text-xs text-[var(--text-muted)]">
                   User ID: <span className="font-mono">{detail.profile.userId}</span> ·{" "}
                   {detail.profile.email ?? "no email"} · OAuth: {detail.profile.authProvider}
                 </p>
                 <p className="mt-2 text-xs text-[var(--text-secondary)]">
-                  Tier: <strong className="text-[var(--accent-highlight)]">{detail.profile.tier}</strong> ·
                   Caps: {detail.profile.maxPlaysets} sets / {detail.profile.maxItemsPerSet} items ·
                   Ko-fi Code: <span className="font-mono">{detail.profile.kofiClaimCode}</span> ·
                   Media: {detail.storage.files} files ({Math.round(detail.storage.bytes / 1024)} KB)
@@ -281,16 +297,25 @@ export default function AdminCreatorDetailPage({
           {detail.restrictions.length > 0 && (
             <AdminTable
               caption="Account Restrictions"
+              loading={loading}
               rows={detail.restrictions}
               rowKey={(r) => r.id}
               rowHeaderLabel="Type"
-              rowHeader={(r) => r.type}
+              rowHeader={(r) => <StatusBadge value={r.type} />}
               columns={[
                 { key: "reason", label: "Reason", render: (r) => r.reason },
                 {
                   key: "state",
                   label: "Status",
-                  render: (r) => (r.liftedAt ? `Lifted (${new Date(r.liftedAt).toLocaleDateString()})` : "ACTIVE"),
+                  render: (r) =>
+                    r.liftedAt ? (
+                      <StatusBadge
+                        value="DISMISSED"
+                        label={`Lifted (${new Date(r.liftedAt).toLocaleDateString()})`}
+                      />
+                    ) : (
+                      <StatusBadge value="ACTIVE" />
+                    ),
                 },
                 {
                   key: "act",
@@ -320,6 +345,7 @@ export default function AdminCreatorDetailPage({
 
           <AdminTable
             caption={`Creator Playsets (${detail.playsets.length})`}
+            loading={loading}
             rows={detail.playsets}
             rowKey={(p) => p.id}
             rowHeaderLabel="Title"
@@ -332,8 +358,21 @@ export default function AdminCreatorDetailPage({
               </Link>
             )}
             columns={[
-              { key: "status", label: "Status", render: (p) => `${p.status} / ${p.visibility}` },
-              { key: "mod", label: "Moderation", render: (p) => p.moderationState },
+              {
+                key: "status",
+                label: "Status",
+                render: (p) => (
+                  <div className="flex flex-wrap gap-1.5">
+                    <StatusBadge value={p.status} />
+                    <StatusBadge value={p.visibility} />
+                  </div>
+                ),
+              },
+              {
+                key: "mod",
+                label: "Moderation",
+                render: (p) => <StatusBadge value={p.moderationState} />,
+              },
               { key: "items", label: "Items", align: "right", render: (p) => p.itemCount },
               { key: "reports", label: "Open Reports", align: "right", render: (p) => p.openReports },
             ]}

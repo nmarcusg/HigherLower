@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Database, Mail, Play, Search, Trash2, UserPlus, X } from "lucide-react";
 import { useAdminAuth } from "@/components/admin/AdminShell";
+import AdminRefreshButton from "@/components/admin/AdminRefreshButton";
 import AdminTable from "@/components/admin/AdminTable";
+import StatusBadge from "@/components/admin/StatusBadge";
 import {
   fetchAdminCreators,
   fetchAdminStaff,
@@ -22,21 +24,12 @@ type SystemData = Awaited<ReturnType<typeof fetchAdminSystem>>;
 type StaffData = Awaited<ReturnType<typeof fetchAdminStaff>>;
 type CleanupPreview = Awaited<ReturnType<typeof runAdminRetentionCleanup>>;
 
-function roleBadgeClass(role: StaffRole): string {
-  if (role === "SUPERADMIN") {
-    return "border border-[var(--accent-highlight)]/45 bg-[var(--accent-highlight)]/15 text-[var(--accent-highlight)]";
-  }
-  if (role === "ADMIN") {
-    return "bg-white/10 text-[var(--accent-action-higher)]";
-  }
-  return "bg-white/10 text-[var(--text-secondary)]";
-}
-
 export default function AdminSystemStaffPage() {
   const { token, identity } = useAdminAuth();
   const [sys, setSys] = useState<SystemData | null>(null);
   const [staff, setStaff] = useState<StaffData["staff"]>([]);
   const [invites, setInvites] = useState<AdminStaffInvite[]>([]);
+  const [loading, setLoading] = useState(true);
   const [cleanupDays, setCleanupDays] = useState("30");
   const [cleanupPreview, setCleanupPreview] = useState<CleanupPreview | null>(null);
 
@@ -57,6 +50,7 @@ export default function AdminSystemStaffPage() {
 
   const load = useCallback(async () => {
     if (identity.role !== "SUPERADMIN") return;
+    setLoading(true);
     try {
       const [sysRes, staffRes] = await Promise.all([
         fetchAdminSystem(token),
@@ -68,6 +62,8 @@ export default function AdminSystemStaffPage() {
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load system status.");
+    } finally {
+      setLoading(false);
     }
   }, [identity.role, token]);
 
@@ -209,11 +205,14 @@ export default function AdminSystemStaffPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-bold">System, Retention &amp; Staff</h1>
-        <p className="mt-1 text-xs text-[var(--text-muted)]">
-          Database readiness, analytics rollup, safe 30-day session retention cleanup, and RBAC staff roster.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">System, Retention &amp; Staff</h1>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">
+            Database readiness, analytics rollup, safe 30-day session retention cleanup, and RBAC staff roster.
+          </p>
+        </div>
+        <AdminRefreshButton tabKey="system" onRefresh={load} />
       </header>
 
       {error && (
@@ -227,35 +226,41 @@ export default function AdminSystemStaffPage() {
         </div>
       )}
 
-      {sys && (
-        <div className="grid gap-4 sm:grid-cols-4">
-          <div className="rounded-md border border-white/15 bg-[#121628] p-4">
-            <p className="text-[11px] uppercase text-[var(--text-muted)]">Postgres DB</p>
-            <p className="mt-1 text-xl font-bold">
-              {sys.dbReady ? `Ready (${sys.dbLatencyMs}ms)` : "Unavailable"}
-            </p>
-          </div>
-          <div className="rounded-md border border-white/15 bg-[#121628] p-4">
-            <p className="text-[11px] uppercase text-[var(--text-muted)]">Process &amp; Memory</p>
-            <p className="mt-1 text-xl font-bold">{sys.memoryMb.rss} MB RSS</p>
-            <p className="text-[11px] text-[var(--text-muted)]">Uptime {Math.floor(sys.uptimeSeconds / 60)}m</p>
-          </div>
-          <div className="rounded-md border border-white/15 bg-[#121628] p-4">
-            <p className="text-[11px] uppercase text-[var(--text-muted)]">Playset Uploads</p>
-            <p className="mt-1 text-xl font-bold">{sys.storage.uploadedMediaCount} files</p>
-            <p className="text-[11px] text-[var(--text-muted)]">
-              {(sys.storage.uploadedMediaBytes / 1024).toFixed(1)} KB total
-            </p>
-          </div>
-          <div className="rounded-md border border-white/15 bg-[#121628] p-4">
-            <p className="text-[11px] uppercase text-[var(--text-muted)]">Latest Rollup</p>
-            <p className="mt-1 text-xl font-bold">{sys.rollup.lastRolledDay ?? "Never"}</p>
-            <p className="text-[11px] text-[var(--text-muted)]">
-              {sys.rollup.dailyVisitorRows} daily visitor rows
-            </p>
-          </div>
-        </div>
-      )}
+      <div className="grid gap-4 sm:grid-cols-4">
+        {sys ? (
+          <>
+            <div className="rounded-md border border-white/15 bg-[#121628] p-4">
+              <p className="text-[11px] uppercase text-[var(--text-muted)]">Postgres DB</p>
+              <p className="mt-1 text-xl font-bold">
+                {sys.dbReady ? `Ready (${sys.dbLatencyMs}ms)` : "Unavailable"}
+              </p>
+            </div>
+            <div className="rounded-md border border-white/15 bg-[#121628] p-4">
+              <p className="text-[11px] uppercase text-[var(--text-muted)]">Process &amp; Memory</p>
+              <p className="mt-1 text-xl font-bold">{sys.memoryMb.rss} MB RSS</p>
+              <p className="text-[11px] text-[var(--text-muted)]">Uptime {Math.floor(sys.uptimeSeconds / 60)}m</p>
+            </div>
+            <div className="rounded-md border border-white/15 bg-[#121628] p-4">
+              <p className="text-[11px] uppercase text-[var(--text-muted)]">Playset Uploads</p>
+              <p className="mt-1 text-xl font-bold">{sys.storage.uploadedMediaCount} files</p>
+              <p className="text-[11px] text-[var(--text-muted)]">
+                {(sys.storage.uploadedMediaBytes / 1024).toFixed(1)} KB total
+              </p>
+            </div>
+            <div className="rounded-md border border-white/15 bg-[#121628] p-4">
+              <p className="text-[11px] uppercase text-[var(--text-muted)]">Latest Rollup</p>
+              <p className="mt-1 text-xl font-bold">{sys.rollup.lastRolledDay ?? "Never"}</p>
+              <p className="text-[11px] text-[var(--text-muted)]">
+                {sys.rollup.dailyVisitorRows} daily visitor rows
+              </p>
+            </div>
+          </>
+        ) : (
+          [0, 1, 2, 3].map((i) => (
+            <div key={i} className="h-24 animate-pulse rounded-md border border-white/10 bg-[#121628]" />
+          ))
+        )}
+      </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="space-y-4 rounded-md border border-white/15 bg-[#121628] p-5">
@@ -491,6 +496,7 @@ export default function AdminSystemStaffPage() {
       {invites.length > 0 && (
         <AdminTable
           caption="Pending Email Invites (auto-claimed on first verified login)"
+          loading={loading}
           rows={invites}
           rowKey={(inv) => inv.id}
           rowHeaderLabel="Email"
@@ -506,11 +512,7 @@ export default function AdminSystemStaffPage() {
             {
               key: "role",
               label: "Role",
-              render: (inv) => (
-                <span className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${roleBadgeClass(inv.role)}`}>
-                  {inv.role}
-                </span>
-              ),
+              render: (inv) => <StatusBadge value={inv.role} />,
             },
             {
               key: "provider",
@@ -543,6 +545,7 @@ export default function AdminSystemStaffPage() {
 
       <AdminTable
         caption="Staff Roster"
+        loading={loading}
         rows={staff}
         rowKey={(s) => s.userId}
         rowHeaderLabel="Staff Member"
@@ -562,9 +565,12 @@ export default function AdminSystemStaffPage() {
                   {s.authProvider}
                 </span>
               )}
+              {s.protected && (
+                <StatusBadge value="PROTECTED" label="Protected" lockIcon />
+              )}
             </div>
             <p className="text-[11px] font-normal text-[var(--text-secondary)]">
-              {s.email ?? "No verified email synced yet"}
+              {s.email ?? "No verified email synced yet (never signed in)"}
             </p>
             <p className="font-mono text-[10px] font-normal text-[var(--text-muted)]">{s.userId}</p>
           </div>
@@ -573,20 +579,19 @@ export default function AdminSystemStaffPage() {
           {
             key: "role",
             label: "Role",
-            render: (s) => (
-              <span className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${roleBadgeClass(s.role)}`}>
-                {s.role}
-              </span>
-            ),
+            render: (s) => <StatusBadge value={s.role} />,
           },
           {
             key: "status",
             label: "Status",
             render: (s) =>
               s.revokedAt ? (
-                <span className="text-red-300">Revoked ({new Date(s.revokedAt).toLocaleDateString()})</span>
+                <StatusBadge
+                  value="REVOKED"
+                  label={`Revoked (${new Date(s.revokedAt).toLocaleDateString()})`}
+                />
               ) : (
-                <span className="text-emerald-300">Active</span>
+                <StatusBadge value="ACTIVE" />
               ),
           },
           { key: "by", label: "Granted By", render: (s) => s.grantedBy ?? "CLI" },
@@ -595,7 +600,11 @@ export default function AdminSystemStaffPage() {
             label: "Action",
             align: "right",
             render: (s) =>
-              !s.revokedAt ? (
+              s.protected ? (
+                <span className="text-[11px] font-semibold text-[var(--accent-highlight)]">
+                  Unrevokable
+                </span>
+              ) : !s.revokedAt ? (
                 <button
                   type="button"
                   disabled={busy}

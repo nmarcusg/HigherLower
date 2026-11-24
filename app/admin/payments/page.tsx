@@ -4,8 +4,10 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { Link2, Save } from "lucide-react";
 import { useAdminAuth } from "@/components/admin/AdminShell";
+import AdminRefreshButton from "@/components/admin/AdminRefreshButton";
 import AdminTable from "@/components/admin/AdminTable";
 import AdminTabs from "@/components/admin/AdminTabs";
+import StatusBadge from "@/components/admin/StatusBadge";
 import NativeModalDialog from "@/components/ui/NativeModalDialog";
 import {
   fetchAdminPayments,
@@ -14,10 +16,24 @@ import {
   linkAdminPayment,
   updateAdminSettings,
   type AdminPaymentRow,
+  type AdminPaymentsSummary,
   type AdminPlatformSettings,
 } from "@/lib/backend/admin";
 
 type PayTab = "transactions" | "pricing" | "ads";
+
+function formatMinor(amountMinor: number, currency: string) {
+  const major = amountMinor / 100;
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: major % 1 === 0 ? 0 : 2,
+    }).format(major);
+  } catch {
+    return `${major.toFixed(2)} ${currency}`;
+  }
+}
 
 export default function AdminPaymentsAdsPage() {
   const { token, identity } = useAdminAuth();
@@ -25,7 +41,9 @@ export default function AdminPaymentsAdsPage() {
   const isSuperAdmin = identity.role === "SUPERADMIN";
   const [tab, setTab] = useState<PayTab>("transactions");
   const [payments, setPayments] = useState<AdminPaymentRow[]>([]);
+  const [summary, setSummary] = useState<AdminPaymentsSummary | null>(null);
   const [settings, setSettings] = useState<AdminPlatformSettings | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -50,12 +68,14 @@ export default function AdminPaymentsAdsPage() {
 
   const loadAll = useCallback(async () => {
     if (!isAdmin) return;
+    setLoading(true);
     try {
       const [payRes, setRes] = await Promise.all([
         fetchAdminPayments(token),
         isSuperAdmin ? fetchAdminSettings(token) : Promise.resolve(null),
       ]);
       setPayments(payRes.payments);
+      if (payRes.summary) setSummary(payRes.summary);
       if (setRes) {
         setSettings(setRes);
         setXenditEnabled(setRes.payments.xenditEnabled);
@@ -72,6 +92,8 @@ export default function AdminPaymentsAdsPage() {
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load payments & settings.");
+    } finally {
+      setLoading(false);
     }
   }, [isAdmin, isSuperAdmin, token]);
 
@@ -161,17 +183,95 @@ export default function AdminPaymentsAdsPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-bold">Payments, Pricing &amp; Ads</h1>
-        <p className="mt-1 text-xs text-[var(--text-muted)]">
-          Manage Xendit &amp; Ko-fi unlocks, link unmatched receipts, and control ad slots + dynamic /ads.txt.
-        </p>
-        {!isSuperAdmin && (
-          <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
-            Pricing, payment provider switches, and Ads &amp; /ads.txt settings require SUPERADMIN access.
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Payments, Pricing &amp; Ads</h1>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">
+            Manage Xendit &amp; Ko-fi unlocks, link unmatched receipts, and control ad slots + dynamic /ads.txt.
           </p>
-        )}
+          {!isSuperAdmin && (
+            <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+              Pricing, payment provider switches, and Ads &amp; /ads.txt settings require SUPERADMIN access.
+            </p>
+          )}
+        </div>
+        <AdminRefreshButton tabKey="payments" onRefresh={loadAll} />
       </header>
+
+      {/* Payments & Ads Summary Overview Strip */}
+      <section aria-label="Payments and ads summary" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {summary ? (
+          <>
+            <div className="rounded-md border border-white/15 bg-[#121628] p-4">
+              <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                Transactions
+              </p>
+              <p className="mt-1.5 text-2xl font-bold tabular-nums text-white">
+                {summary.totalCount}
+              </p>
+              <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
+                {summary.pendingCount} pending · {summary.failedOrRefundedCount} failed/refunded
+              </p>
+            </div>
+            <div className="rounded-md border border-white/15 bg-[#121628] p-4">
+              <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                Completed &amp; Grants
+              </p>
+              <p className="mt-1.5 text-2xl font-bold tabular-nums text-emerald-300">
+                {summary.completedCount}
+              </p>
+              <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
+                Includes {summary.adminGrantCount} admin Pro grant(s)
+              </p>
+            </div>
+            <div className="rounded-md border border-white/15 bg-[#121628] p-4">
+              <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                Unmatched Ko-fi
+              </p>
+              <p
+                className={`mt-1.5 text-2xl font-bold tabular-nums ${
+                  summary.unmatchedCount > 0 ? "text-amber-300" : "text-white"
+                }`}
+              >
+                {summary.unmatchedCount}
+              </p>
+              <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
+                {summary.unmatchedCount > 0 ? "Needs manual creator link" : "All receipts matched"}
+              </p>
+            </div>
+            <div className="rounded-md border border-white/15 bg-[#121628] p-4">
+              <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                Paid Revenue &amp; Status
+              </p>
+              <p className="mt-1.5 text-sm font-bold text-[var(--accent-highlight)]">
+                {summary.revenueByCurrency.length > 0
+                  ? summary.revenueByCurrency
+                      .map((r) => formatMinor(r.amountMinor, r.currency))
+                      .join(" · ")
+                  : "0 paid receipts"}
+              </p>
+              {settings && (
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  <StatusBadge
+                    value={settings.ads.enabled ? "ENABLED" : "PAUSED"}
+                    label={`Ads ${settings.ads.enabled ? "On" : "Paused"}`}
+                  />
+                  {(settings.payments.xenditEnabled || settings.payments.kofiEnabled) && (
+                    <StatusBadge value="ACTIVE" label="Checkout Active" />
+                  )}
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          [0, 1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="h-24 animate-pulse rounded-md border border-white/10 bg-[#121628]"
+            />
+          ))
+        )}
+      </section>
 
       <AdminTabs
         label="Payments & Ads sections"
@@ -202,6 +302,7 @@ export default function AdminPaymentsAdsPage() {
       {tab === "transactions" && (
         <AdminTable
           caption="Payment Ledger (Xendit · Ko-fi · Admin Grants)"
+          loading={loading}
           rows={payments}
           rowKey={(p) => p.id}
           rowHeaderLabel="Reference"
@@ -215,19 +316,7 @@ export default function AdminPaymentsAdsPage() {
             {
               key: "status",
               label: "Status",
-              render: (p) => (
-                <span
-                  className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${
-                    p.status === "COMPLETED"
-                      ? "bg-emerald-500/20 text-emerald-300"
-                      : p.status === "UNMATCHED"
-                        ? "bg-amber-500/20 text-amber-200"
-                        : "bg-white/10 text-white/75"
-                  }`}
-                >
-                  {p.status}
-                </span>
-              ),
+              render: (p) => <StatusBadge value={p.status} />,
             },
             {
               key: "creator",
@@ -247,7 +336,7 @@ export default function AdminPaymentsAdsPage() {
             {
               key: "amount",
               label: "Amount",
-              render: (p) => `${(p.amountMinor / 100).toFixed(2)} ${p.currency}`,
+              render: (p) => formatMinor(p.amountMinor, p.currency),
             },
             {
               key: "date",
@@ -388,7 +477,7 @@ export default function AdminPaymentsAdsPage() {
 
           <label className="block text-xs font-bold uppercase tracking-[0.1em] text-[var(--text-muted)]">
             /ads.txt Contents (served live at{" "}
-            <a href="/ads.txt" target="_blank" rel="noopener noreferrer" className="underline text-[var(--accent-action-higher)]">
+            <a href="/ads.txt" target="_blank" rel="noopener noreferrer" className="text-[var(--accent-action-higher)] underline">
               /ads.txt
             </a>
             )

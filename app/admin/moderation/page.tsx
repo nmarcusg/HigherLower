@@ -5,8 +5,10 @@ import Image from "next/image";
 import Link from "next/link";
 import { Ban, CheckCircle2, Eye, EyeOff, LoaderCircle, ShieldAlert } from "lucide-react";
 import { useAdminAuth } from "@/components/admin/AdminShell";
+import AdminRefreshButton from "@/components/admin/AdminRefreshButton";
 import AdminTable from "@/components/admin/AdminTable";
 import AdminTabs from "@/components/admin/AdminTabs";
+import StatusBadge from "@/components/admin/StatusBadge";
 import NativeModalDialog from "@/components/ui/NativeModalDialog";
 import {
   blockAdminMedia,
@@ -16,14 +18,16 @@ import {
   resolveAdminReport,
   type AdminPlaysetDetail,
   type ModerationQueueEntry,
+  type ModerationQueueOverview,
 } from "@/lib/backend/admin";
 
-type QueueTab = "reports" | "flagged" | "recent";
+type QueueTab = "recent" | "reports" | "flagged";
 
 export default function AdminModerationPage() {
   const { token } = useAdminAuth();
-  const [tab, setTab] = useState<QueueTab>("reports");
+  const [tab, setTab] = useState<QueueTab>("recent");
   const [entries, setEntries] = useState<ModerationQueueEntry[]>([]);
+  const [overview, setOverview] = useState<ModerationQueueOverview | null>(null);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -35,12 +39,22 @@ export default function AdminModerationPage() {
   const [actionReason, setActionReason] = useState("");
   const [actionBusy, setActionBusy] = useState(false);
 
+  useEffect(() => {
+    queueMicrotask(() => {
+      const requested = new URLSearchParams(window.location.search).get("tab");
+      if (requested === "reports" || requested === "flagged" || requested === "recent") {
+        setTab(requested);
+      }
+    });
+  }, []);
+
   const loadQueue = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetchModerationQueue(token, tab);
       setEntries(res.entries);
       setTotal(res.total);
+      if (res.overview) setOverview(res.overview);
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load moderation queue.");
@@ -126,22 +140,104 @@ export default function AdminModerationPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-wrap items-center justify-between gap-4">
+      <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Content Moderation</h1>
           <p className="mt-1 text-xs text-[var(--text-muted)]">
-            Review visitor reports, auto-flagged custom playsets, and recently published content.
+            Review recently published playsets, visitor reports, and auto-flagged custom content.
           </p>
         </div>
-        <span className="text-xs text-[var(--text-muted)]">{total} item(s) in queue</span>
+        <div className="flex items-start gap-4">
+          <span className="pt-2 text-xs text-[var(--text-muted)]">{total} item(s) in queue</span>
+          <AdminRefreshButton tabKey="moderation" onRefresh={loadQueue} />
+        </div>
       </header>
+
+      {/* Moderation Overview KPI Strip */}
+      <section aria-label="Moderation overview" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {overview ? (
+          <>
+            <div className="rounded-md border border-white/15 bg-[#121628] p-4">
+              <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                Published Custom Sets
+              </p>
+              <p className="mt-1.5 text-2xl font-bold tabular-nums text-white">
+                {overview.recentPublishedCount}
+              </p>
+              <p className="mt-0.5 text-[11px] text-sky-300">
+                {overview.unreviewedPublishedCount} awaiting review
+              </p>
+            </div>
+            <div className="rounded-md border border-white/15 bg-[#121628] p-4">
+              <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                Open Visitor Reports
+              </p>
+              <p
+                className={`mt-1.5 text-2xl font-bold tabular-nums ${
+                  overview.openReportsTotalCount > 0 ? "text-red-300" : "text-white"
+                }`}
+              >
+                {overview.openReportsTotalCount}
+              </p>
+              <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
+                Across {overview.openReportsPlaysetsCount} playset(s)
+              </p>
+            </div>
+            <div className="rounded-md border border-white/15 bg-[#121628] p-4">
+              <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                Auto-Flagged Queue
+              </p>
+              <p
+                className={`mt-1.5 text-2xl font-bold tabular-nums ${
+                  overview.autoFlaggedCount > 0 ? "text-amber-300" : "text-white"
+                }`}
+              >
+                {overview.autoFlaggedCount}
+              </p>
+              <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
+                Keyword / spam heuristic hits
+              </p>
+            </div>
+            <div className="rounded-md border border-white/15 bg-[#121628] p-4">
+              <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                Hidden / Removed
+              </p>
+              <p className="mt-1.5 text-2xl font-bold tabular-nums text-amber-200">
+                {overview.hiddenOrRemovedCount}
+              </p>
+              <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
+                Restricted by moderation
+              </p>
+            </div>
+          </>
+        ) : (
+          [0, 1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="h-24 animate-pulse rounded-md border border-white/10 bg-[#121628]"
+            />
+          ))
+        )}
+      </section>
 
       <AdminTabs
         label="Moderation queues"
         tabs={[
-          { id: "reports", label: "Visitor Reports" },
-          { id: "flagged", label: "Auto-Flagged" },
-          { id: "recent", label: "Recently Published" },
+          {
+            id: "recent",
+            label: "Recently Published",
+            badge: overview?.recentPublishedCount,
+          },
+          {
+            id: "reports",
+            label: "Visitor Reports",
+            badge: overview?.openReportsPlaysetsCount,
+          },
+          {
+            id: "flagged",
+            label: "Auto-Flagged",
+            badge: overview?.autoFlaggedCount,
+          },
         ]}
         activeId={tab}
         onChange={setTab}
@@ -159,11 +255,12 @@ export default function AdminModerationPage() {
       )}
 
       <AdminTable
-        caption={`${tab.toUpperCase()} Queue`}
+        caption={`${tab === "recent" ? "Recently Published" : tab === "reports" ? "Visitor Reports" : "Auto-Flagged"} Queue`}
+        loading={loading}
         rows={entries}
         rowKey={(e) => e.playsetId}
         rowHeaderLabel="Playset"
-        emptyMessage={loading ? "Loading queue…" : "Queue is clean!"}
+        emptyMessage="Queue is clean!"
         rowHeader={(e) => (
           <div>
             <p className="font-bold text-white">{e.title}</p>
@@ -174,13 +271,19 @@ export default function AdminModerationPage() {
         )}
         columns={[
           {
-            key: "state",
-            label: "State",
+            key: "visibility",
+            label: "Status / Visibility",
             render: (e) => (
-              <span className="rounded bg-white/10 px-2 py-0.5 text-[10px] font-bold uppercase">
-                {e.moderationState}
-              </span>
+              <div className="flex flex-wrap gap-1.5">
+                <StatusBadge value={e.status} />
+                <StatusBadge value={e.visibility} />
+              </div>
             ),
+          },
+          {
+            key: "state",
+            label: "Moderation",
+            render: (e) => <StatusBadge value={e.moderationState} />,
           },
           {
             key: "signals",
@@ -195,12 +298,15 @@ export default function AdminModerationPage() {
                     {[...e.reasons, ...e.autoFlags].join(", ")}
                   </p>
                 )}
+                {e.openReportCount === 0 && e.reasons.length === 0 && e.autoFlags.length === 0 && (
+                  <span className="text-[var(--text-muted)]">—</span>
+                )}
               </div>
             ),
           },
           {
             key: "age",
-            label: "Since",
+            label: tab === "recent" ? "Published" : "Since",
             render: (e) =>
               e.oldestReportAt ? new Date(e.oldestReportAt).toLocaleDateString() : "—",
           },
@@ -235,12 +341,13 @@ export default function AdminModerationPage() {
         ) : (
           <div className="max-h-[72vh] space-y-5 overflow-y-auto pr-1 text-xs">
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-sm border border-white/10 bg-black/25 p-3">
-              <div>
+              <div className="space-y-1.5">
                 <p className="text-sm font-bold text-white">{reviewDetail.title}</p>
-                <p className="text-[var(--text-muted)]">
-                  State: <strong className="text-white">{reviewDetail.moderationState}</strong> · Visibility:{" "}
-                  <strong className="text-white">{reviewDetail.visibility}</strong>
-                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusBadge value={reviewDetail.moderationState} />
+                  <StatusBadge value={reviewDetail.status} />
+                  <StatusBadge value={reviewDetail.visibility} />
+                </div>
                 {reviewDetail.autoFlags.length > 0 && (
                   <p className="mt-1 text-amber-300">Auto-flags: {reviewDetail.autoFlags.join(", ")}</p>
                 )}
@@ -266,10 +373,12 @@ export default function AdminModerationPage() {
                       key={r.id}
                       className="flex flex-wrap items-center justify-between gap-2 rounded-sm border border-white/10 bg-black/20 p-2.5"
                     >
-                      <div>
-                        <span className="font-bold text-amber-200">{r.reason}</span>{" "}
-                        <span className="text-[10px] text-[var(--text-muted)]">({r.status})</span>
-                        {r.details && <p className="mt-1 text-[var(--text-secondary)]">{r.details}</p>}
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-amber-200">{r.reason}</span>
+                          <StatusBadge value={r.status} />
+                        </div>
+                        {r.details && <p className="text-[var(--text-secondary)]">{r.details}</p>}
                       </div>
                       {r.status === "OPEN" && (
                         <div className="flex gap-1.5">

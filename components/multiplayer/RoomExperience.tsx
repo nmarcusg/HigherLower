@@ -14,6 +14,7 @@ import {
   kickRoomPlayer,
   readRoomCredential,
   roomAction,
+  setLobbyRole,
   storeRoomCredential,
   transferRoomHost,
   updateRoomSettings,
@@ -313,7 +314,7 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
         socket.disconnect();
         setConnection("closed");
         setSnapshot(null);
-        setMessage("You were removed from the room by the host.");
+        setMessage(error?.message || "You were removed from the room by the host.");
         return;
       }
       setMessage(error?.message || "The room rejected that action.");
@@ -358,10 +359,35 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
         };
       });
     });
-    socket.on("room:ended", (event: { state?: MultiplayerSnapshot; status?: string }) => {
-      if (event?.state) applySnapshot(event.state);
-      if (event?.status === "FINISHED") void getRoomResults(saved).then(setResults).catch(() => undefined);
-    });
+    socket.on(
+      "room:ended",
+      (event: {
+        state?: MultiplayerSnapshot;
+        status?: string;
+        endedBy?: MultiplayerSnapshot["endedBy"];
+        endReason?: string | null;
+      }) => {
+        if (event?.state) {
+          applySnapshot({
+            ...event.state,
+            endedBy: event.endedBy ?? event.state.endedBy ?? null,
+            endReason: event.endReason ?? event.state.endReason ?? null,
+          });
+        } else if (event?.endedBy !== undefined || event?.endReason !== undefined) {
+          setSnapshot((current) =>
+            current
+              ? {
+                  ...current,
+                  status: event.status ?? current.status,
+                  endedBy: event.endedBy ?? current.endedBy ?? null,
+                  endReason: event.endReason ?? current.endReason ?? null,
+                }
+              : current,
+          );
+        }
+        if (event?.status === "FINISHED") void getRoomResults(saved).then(setResults).catch(() => undefined);
+      },
+    );
     socket.on("room:postmatch", (event?: { hostActorId?: string; nextSessionId?: string | null }) => {
       if (event?.hostActorId) {
         const nextHostActorId = event.hostActorId;
@@ -470,7 +496,10 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
     (you.forfeitReason === "MATCH_LEFT" ||
       (you.role === "PLAYER" && (you.forfeited === true || snapshot?.readOnly === true)));
   const isSpectator = isTrueSpectator || leftMatch || snapshot?.readOnly === true;
-  const isHost = !isTrueSpectator && (you.isHost === true || (Boolean(snapshot?.hostActorId) && you.actorId === snapshot?.hostActorId));
+  const canControlAsHost = status === "LOBBY" || status === "FINISHED";
+  const isHost =
+    (you.isHost === true || (Boolean(snapshot?.hostActorId) && you.actorId === snapshot?.hostActorId)) &&
+    (!isTrueSpectator || canControlAsHost);
 
   // Notify the player if host privilege was transferred to them (even via HTTP refresh/resync).
   useEffect(() => {
@@ -495,6 +524,9 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
     wasHostRef.current = isHost;
   }, [isHost, snapshot, status]);
   const playerCount = Array.isArray(snapshot?.players) ? snapshot.players.filter((player) => player.role !== "SPECTATOR").length : 0;
+  const spectatorCount = Array.isArray(snapshot?.players) ? snapshot.players.filter((player) => player.role === "SPECTATOR").length : 0;
+  const maxPlayers = typeof snapshot?.capacity?.maxPlayers === "number" ? snapshot.capacity.maxPlayers : null;
+  const lobbyFullForPlayer = isTrueSpectator && maxPlayers !== null && playerCount >= maxPlayers;
   const currentPlaysetId = asText(snapshot?.playsetId, "");
   const resolvedPlaysetTitle = useMemo(() => {
     const directTitle = asText(snapshot?.playsetTitle, "").trim();
@@ -617,13 +649,33 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
   function requestExitRoom() {
     const needsHostConfirm =
       isHost &&
-      !isTrueSpectator &&
-      (status === "RUNNING" || (status === "LOBBY" && playerCount > 1));
+      (status === "RUNNING" || (status === "LOBBY" && (playerCount > 1 || spectatorCount > 0)));
     if (needsHostConfirm) {
       setConfirmHostLeaveRoom(true);
       return;
     }
     void exitRoom();
+  }
+
+  async function toggleLobbyRole(nextRole: "PLAYER" | "SPECTATOR") {
+    if (!credential || status !== "LOBBY") return;
+    const currentRole = isTrueSpectator ? "SPECTATOR" : "PLAYER";
+    if (currentRole === nextRole) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const next = await setLobbyRole(credential, nextRole);
+      applySnapshot(next);
+      setMessage(
+        nextRole === "SPECTATOR"
+          ? "Switched to Spectating. You can watch this match without competing on the scoreboard."
+          : "Switched to Playing. You are ready to compete when the host starts.",
+      );
+    } catch (error) {
+      setMessage(readableError(error));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function leaveCurrentMatch() {
@@ -878,10 +930,72 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
 
         {message && <div role="status" className="mb-5 rounded-sm border border-amber-300/30 bg-amber-200/10 px-4 py-3 text-xs text-amber-100">{message}</div>}
 
-        {status === "LOBBY" && !isSpectator && (
+        {status === "LOBBY" && (
           <div className="grid gap-5 md:grid-cols-[1fr_0.8fr]">
             <section className={CARD}>
-              <div className="mb-5 flex items-center justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-action-higher)]">Players</p><h2 className="mt-1 text-2xl font-bold">Waiting room</h2></div><span className="inline-flex items-center gap-2 text-sm text-[var(--text-secondary)]"><Users size={16} /> {playerCount}{snapshot.capacity?.maxPlayers ? `/${snapshot.capacity.maxPlayers}` : " players"}</span></div>
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-action-higher)]">
+                    Players
+                  </p>
+                  <h2 className="mt-1 text-2xl font-bold">Waiting room</h2>
+                </div>
+                <span className="inline-flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                  <Users size={16} /> {playerCount} playing
+                  {maxPlayers ? ` / ${maxPlayers}` : ""}
+                  {spectatorCount > 0 ? ` · ${spectatorCount} spectating` : ""}
+                </span>
+              </div>
+
+              <div className="mb-5 rounded-sm border border-white/15 bg-white/[0.03] p-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--text-primary)]">
+                      Your lobby role
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
+                      {lobbyFullForPlayer
+                        ? `All ${maxPlayers} player seats are taken right now.`
+                        : isTrueSpectator
+                          ? "Watching the scoreboard and live rounds as a spectator."
+                          : "Ready to compete when the match starts."}
+                    </p>
+                  </div>
+                  <div
+                    role="group"
+                    aria-label="Lobby role toggle"
+                    className="inline-flex rounded-sm border border-white/20 bg-[#120f24] p-0.5"
+                  >
+                    <button
+                      type="button"
+                      aria-pressed={!isTrueSpectator}
+                      disabled={busy || lobbyFullForPlayer}
+                      onClick={() => void toggleLobbyRole("PLAYER")}
+                      className={`cursor-pointer rounded-sm px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                        !isTrueSpectator
+                          ? "bg-[var(--accent-action-higher)] text-[#15122b]"
+                          : "text-[var(--text-secondary)] hover:text-white"
+                      }`}
+                    >
+                      Playing
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={isTrueSpectator}
+                      disabled={busy}
+                      onClick={() => void toggleLobbyRole("SPECTATOR")}
+                      className={`cursor-pointer rounded-sm px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                        isTrueSpectator
+                          ? "bg-[var(--accent-time-attack)] text-white"
+                          : "text-[var(--text-secondary)] hover:text-white"
+                      }`}
+                    >
+                      Spectating
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <div className="space-y-2">
                 {playersForList.map((player) => {
                   const actorId = asText(player.actorId);
@@ -891,8 +1005,8 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
                     Boolean(actorId) &&
                     actorId !== asText(you.actorId) &&
                     player.isHost !== true;
-                  const canKick = isHost && !isTrueSpectator && isOtherParticipant;
-                  const canTransferHost = isHost && !isTrueSpectator && isOtherParticipant && isPlayerRole;
+                  const canKick = isHost && isOtherParticipant;
+                  const canTransferHost = isHost && isOtherParticipant && isPlayerRole;
                   return (
                     <PlayerRow
                       key={actorId}
@@ -930,8 +1044,8 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
                 )}
               </div>
               <div className="mt-8">
-                {isHost ? <button className={`${BUTTON} w-full`} type="button" disabled={busy || playerCount < 2} onClick={() => void startRoom()}>{busy ? "Starting…" : playerCount < 2 ? "Waiting for another player" : "Start match"}</button> : <p className="rounded-sm border border-white/15 bg-white/[0.03] px-4 py-3 text-center text-xs text-[var(--text-secondary)]">Waiting for the host to start the match…</p>}
-                {isHost && playerCount < 2 && <p className="mt-3 text-center text-[10px] text-[var(--text-muted)]">At least two players are needed to start.</p>}
+                {isHost ? <button className={`${BUTTON} w-full`} type="button" disabled={busy || playerCount < 2} onClick={() => void startRoom()}>{busy ? "Starting…" : playerCount < 2 ? "Waiting for 2 playing" : "Start match"}</button> : <p className="rounded-sm border border-white/15 bg-white/[0.03] px-4 py-3 text-center text-xs text-[var(--text-secondary)]">Waiting for the host to start the match…</p>}
+                {isHost && playerCount < 2 && <p className="mt-3 text-center text-[10px] text-[var(--text-muted)]">At least 2 participants must be set to Playing to start.</p>}
               </div>
             </section>
           </div>
@@ -1006,19 +1120,58 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
           </div>
         )}
 
-        {finished && <div className="grid gap-5 md:grid-cols-[0.8fr_1fr]"><section className={`${CARD} text-center`}><Trophy className="mx-auto mb-4 text-[var(--accent-highlight)]" size={30} /><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-action-higher)]">Match complete</p><h2 className="mt-2 text-3xl font-bold">{isTrueSpectator ? "Final leaderboard" : "Your final score"}</h2>{!isTrueSpectator && <p className="mt-3 text-5xl font-black text-[var(--accent-highlight)]">{finalScore}</p>}<p className="mt-3 text-xs leading-5 text-[var(--text-muted)]">{isHost && !isTrueSpectator ? "You are the host. Start a rematch to open the next room, or leave for multiplayer." : "Stay in this room to follow the host’s rematch, or leave for multiplayer."}</p><div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">{isHost && !isTrueSpectator ? <button className={BUTTON} disabled={busy} onClick={() => void rematch()}><RotateCcw size={14} /> Rematch</button> : <button className={OUTLINE} disabled={busy} onClick={() => void waitForHostRematch()}>{busy ? "Checking room…" : "Wait for host rematch"}</button>}<button className={OUTLINE} disabled={busy} onClick={() => void exitRoom()}><LogOut size={14} /> Leave to multiplayer</button></div></section><Leaderboard snapshot={snapshot} entries={leaderboard} isSpectator={isTrueSpectator} results={results} matchRemainingMs={matchRemainingMs} /></div>}
-        {cancelled && <section className={`${CARD} mx-auto max-w-xl text-center`}><h2 className="text-2xl font-bold">Room ended</h2><p className="mt-3 text-sm text-[var(--text-secondary)]">The host ended this room. You can return to multiplayer or join another room.</p><Link className={`${BUTTON} mt-6`} href="/multiplayer">Return to multiplayer</Link></section>}
-
-        {status === "LOBBY" && isSpectator && (
-          <div className="grid gap-5 md:grid-cols-[1fr_300px]">
-            <section className={CARD}>
-              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-action-higher)]">Spectator seat</p>
-              <h2 className="mt-1 text-2xl font-bold">Waiting for the match</h2>
-              <p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">The leaderboard will appear when the host starts. You’ll only see player scores and mode stats.</p>
-              <SettingsSummary snapshot={snapshot} playsetTitle={resolvedPlaysetTitle} isHost={false} />
+        {finished && (
+          <div className="grid gap-5 md:grid-cols-[0.8fr_1fr]">
+            <section className={`${CARD} text-center`}>
+              <Trophy className="mx-auto mb-4 text-[var(--accent-highlight)]" size={30} />
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-action-higher)]">Match complete</p>
+              <h2 className="mt-2 text-3xl font-bold">{isTrueSpectator ? "Final leaderboard" : "Your final score"}</h2>
+              {!isTrueSpectator && <p className="mt-3 text-5xl font-black text-[var(--accent-highlight)]">{finalScore}</p>}
+              <p className="mt-3 text-xs leading-5 text-[var(--text-muted)]">
+                {isHost
+                  ? "You are the host. Start a rematch to open the next room, or leave for multiplayer."
+                  : "Stay in this room to follow the host’s rematch, or leave for multiplayer."}
+              </p>
+              <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
+                {isHost ? (
+                  <button className={BUTTON} disabled={busy} onClick={() => void rematch()}>
+                    <RotateCcw size={14} /> Rematch
+                  </button>
+                ) : (
+                  <button className={OUTLINE} disabled={busy} onClick={() => void waitForHostRematch()}>
+                    {busy ? "Checking room…" : "Wait for host rematch"}
+                  </button>
+                )}
+                <button className={OUTLINE} disabled={busy} onClick={() => void exitRoom()}>
+                  <LogOut size={14} /> Leave to multiplayer
+                </button>
+              </div>
             </section>
-            <Leaderboard snapshot={snapshot} entries={leaderboard} isSpectator results={results} matchRemainingMs={matchRemainingMs} />
+            <Leaderboard snapshot={snapshot} entries={leaderboard} isSpectator={isTrueSpectator} results={results} matchRemainingMs={matchRemainingMs} />
           </div>
+        )}
+        {cancelled && (
+          <section className={`${CARD} mx-auto max-w-xl text-center`}>
+            <h2 className="text-2xl font-bold">
+              {snapshot?.endedBy === "ADMIN"
+                ? "Room ended by an administrator"
+                : snapshot?.endedBy === "EXPIRED"
+                  ? "Room expired"
+                  : "Room ended"}
+            </h2>
+            <p className="mt-3 text-sm text-[var(--text-secondary)]">
+              {snapshot?.endedBy === "ADMIN"
+                ? snapshot.endReason
+                  ? `An administrator ended this room: ${snapshot.endReason}`
+                  : "An administrator ended this room for policy or moderation reasons."
+                : snapshot?.endedBy === "EXPIRED"
+                  ? snapshot.endReason || "This room expired due to inactivity."
+                  : snapshot?.endReason || "The host ended this room. You can return to multiplayer or join another room."}
+            </p>
+            <Link className={`${BUTTON} mt-6`} href="/multiplayer">
+              Return to multiplayer
+            </Link>
+          </section>
         )}
       </section>
       <KickPlayerConfirmDialog

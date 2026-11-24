@@ -2,14 +2,17 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { Search, Sparkles } from "lucide-react";
+import { ArrowUpRight, Search, Sparkles } from "lucide-react";
 import { useAdminAuth } from "@/components/admin/AdminShell";
+import AdminRefreshButton from "@/components/admin/AdminRefreshButton";
 import AdminTable from "@/components/admin/AdminTable";
 import AdminTabs from "@/components/admin/AdminTabs";
+import StatusBadge from "@/components/admin/StatusBadge";
 import {
   fetchAdminClusters,
   fetchAdminCreators,
   type AdminCreatorSummary,
+  type StaffRole,
 } from "@/lib/backend/admin";
 
 type CreatorTab = "all" | "clusters";
@@ -33,14 +36,26 @@ export default function AdminCreatorsPage() {
         email: string | null;
         authProvider: string;
         tier: "FREE" | "PRO";
+        staffRole?: StaffRole | null;
         activeSlotsUsed: number;
         lastSeenAt: string;
       }>;
     }>
   >([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    queueMicrotask(() => {
+      const requested = new URLSearchParams(window.location.search).get("tab");
+      if (requested === "clusters" || requested === "all") {
+        setTab(requested);
+      }
+    });
+  }, []);
+
   const loadCreators = useCallback(async () => {
+    setLoading(true);
     try {
       const res = await fetchAdminCreators(token, {
         q: q.trim() || undefined,
@@ -51,16 +66,21 @@ export default function AdminCreatorsPage() {
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load creators.");
+    } finally {
+      setLoading(false);
     }
   }, [q, tier, token]);
 
   const loadClusters = useCallback(async () => {
+    setLoading(true);
     try {
       const res = await fetchAdminClusters(token);
       setClusters(res.clusters);
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load device clusters.");
+    } finally {
+      setLoading(false);
     }
   }, [token]);
 
@@ -78,23 +98,29 @@ export default function AdminCreatorsPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-wrap items-center justify-between gap-4">
+      <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Creators &amp; Anti-Alt</h1>
           <p className="mt-1 text-xs text-[var(--text-muted)]">
-            Manage Free (3 sets / 50 items) vs. Creator Pro (25 sets / 200 items) accounts and shared-device clusters.
+            Manage Free (3 sets / 50 items) vs. Creator Pro (25 sets / 200 items) accounts, staff creators, and device clusters.
           </p>
         </div>
-        <span className="text-xs text-[var(--text-muted)]">
-          {tab === "all" ? `${total} creator(s)` : `${clusters.length} device cluster(s)`}
-        </span>
+        <div className="flex items-start gap-4">
+          <span className="pt-2 text-xs text-[var(--text-muted)]">
+            {tab === "all" ? `${total} creator(s)` : `${clusters.length} device cluster(s)`}
+          </span>
+          <AdminRefreshButton
+            tabKey={`creators:${tab}`}
+            onRefresh={tab === "all" ? loadCreators : loadClusters}
+          />
+        </div>
       </header>
 
       <AdminTabs
         label="Creator views"
         tabs={[
-          { id: "all", label: "All Creators" },
-          { id: "clusters", label: "Suspected Multi-Account Clusters" },
+          { id: "all", label: "All Creators", badge: total || undefined },
+          { id: "clusters", label: "Suspected Multi-Account Clusters", badge: clusters.length || undefined },
         ]}
         activeId={tab}
         onChange={setTab}
@@ -146,17 +172,21 @@ export default function AdminCreatorsPage() {
 
           <AdminTable
             caption="Registered Creators"
+            loading={loading}
             rows={creators}
             rowKey={(c) => c.userId}
             rowHeaderLabel="Creator"
             rowHeader={(c) => (
-              <div>
-                <Link
-                  href={`/admin/creators/${encodeURIComponent(c.userId)}`}
-                  className="font-bold text-[var(--accent-action-higher)] hover:underline"
-                >
-                  @{c.handle}
-                </Link>
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Link
+                    href={`/admin/creators/${encodeURIComponent(c.userId)}`}
+                    className="font-bold text-[var(--accent-action-higher)] hover:underline"
+                  >
+                    @{c.handle}
+                  </Link>
+                  {c.staffRole && <StatusBadge value={c.staffRole} />}
+                </div>
                 <p className="text-[11px] font-normal text-[var(--text-muted)]">
                   {c.displayName} · {c.authProvider}
                 </p>
@@ -168,10 +198,10 @@ export default function AdminCreatorsPage() {
                 label: "Tier",
                 render: (c) => (
                   <span
-                    className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold uppercase ${
+                    className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] font-bold uppercase ${
                       c.tier === "PRO"
-                        ? "bg-[var(--accent-highlight)]/15 text-[var(--accent-highlight)]"
-                        : "bg-white/10 text-white/80"
+                        ? "border-[var(--accent-highlight)]/50 bg-[var(--accent-highlight)]/15 text-[var(--accent-highlight)]"
+                        : "border-white/20 bg-white/10 text-white/80"
                     }`}
                   >
                     {c.tier === "PRO" && <Sparkles size={10} />}
@@ -194,17 +224,38 @@ export default function AdminCreatorsPage() {
                 label: "Restrictions",
                 render: (c) =>
                   c.activeRestrictions.length > 0 ? (
-                    <span className="font-bold text-red-300">{c.activeRestrictions.join(", ")}</span>
+                    <div className="flex flex-wrap gap-1">
+                      {c.activeRestrictions.map((r) => (
+                        <StatusBadge key={r} value={r} />
+                      ))}
+                    </div>
                   ) : (
-                    "—"
+                    <span className="text-[var(--text-muted)]">None</span>
                   ),
+              },
+              {
+                key: "view",
+                label: "Action",
+                align: "right",
+                render: (c) => (
+                  <Link
+                    href={`/admin/creators/${encodeURIComponent(c.userId)}`}
+                    className="inline-flex items-center gap-1 rounded border border-white/20 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.06em] text-white hover:border-[var(--accent-highlight)] hover:text-[var(--accent-highlight)]"
+                  >
+                    View <ArrowUpRight size={11} aria-hidden="true" />
+                  </Link>
+                ),
               },
             ]}
           />
         </>
       ) : (
         <div className="space-y-4">
-          {clusters.length === 0 ? (
+          {loading && clusters.length === 0 ? (
+            <div className="rounded-md border border-white/15 bg-[#121628] p-8 text-center text-sm text-[var(--text-muted)]">
+              Loading device clusters…
+            </div>
+          ) : clusters.length === 0 ? (
             <div className="rounded-md border border-white/15 bg-[#121628] p-8 text-center text-sm text-[var(--text-muted)]">
               No multi-account device clusters detected.
             </div>
@@ -229,10 +280,12 @@ export default function AdminCreatorsPage() {
                       href={`/admin/creators/${encodeURIComponent(acc.userId)}`}
                       className="rounded-sm border border-white/10 bg-black/25 p-3 hover:border-white/30"
                     >
-                      <p className="font-bold text-white">
-                        @{acc.handle} <span className="text-xs text-[var(--accent-highlight)]">({acc.tier})</span>
-                      </p>
-                      <p className="text-[11px] text-[var(--text-muted)]">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-bold text-white">@{acc.handle}</p>
+                        <StatusBadge value={acc.tier} />
+                        {acc.staffRole && <StatusBadge value={acc.staffRole} />}
+                      </div>
+                      <p className="mt-1 text-[11px] text-[var(--text-muted)]">
                         {acc.email ?? acc.authProvider} · {acc.activeSlotsUsed} active set(s)
                       </p>
                     </Link>

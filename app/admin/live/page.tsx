@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { RefreshCw, Save, Search, ShieldOff, UserX } from "lucide-react";
+import { Save, Search, ShieldOff, UserX } from "lucide-react";
 import { useAdminAuth } from "@/components/admin/AdminShell";
+import AdminRefreshButton from "@/components/admin/AdminRefreshButton";
 import AdminTable from "@/components/admin/AdminTable";
+import StatusBadge from "@/components/admin/StatusBadge";
 import NativeModalDialog from "@/components/ui/NativeModalDialog";
 import {
   fetchAdminLive,
@@ -22,6 +24,7 @@ export default function AdminLiveOpsPage() {
   const isAdmin = hasMinRole(identity.role, "ADMIN");
   const isSuperAdmin = identity.role === "SUPERADMIN";
   const [live, setLive] = useState<LiveData | null>(null);
+  const [loading, setLoading] = useState(true);
   const [banner, setBanner] = useState("");
   const [roomsCreateEnabled, setRoomsCreateEnabled] = useState(true);
   const [soloCreateEnabled, setSoloCreateEnabled] = useState(true);
@@ -39,6 +42,7 @@ export default function AdminLiveOpsPage() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
       const res = await fetchAdminLive(token);
       setLive(res);
@@ -50,6 +54,8 @@ export default function AdminLiveOpsPage() {
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load live ops view.");
+    } finally {
+      setLoading(false);
     }
   }, [token]);
 
@@ -104,9 +110,14 @@ export default function AdminLiveOpsPage() {
 
   async function confirmForceEnd() {
     if (!endTarget) return;
+    const trimmed = actionReason.trim() || "Ended by staff";
+    if (trimmed.length < 3) {
+      setError("Enter a reason (min 3 characters).");
+      return;
+    }
     setBusy(true);
     try {
-      await forceEndAdminRoom(token, endTarget.sessionId, actionReason.trim() || "Ended by staff");
+      await forceEndAdminRoom(token, endTarget.sessionId, trimmed);
       setNotice(`Room ${endTarget.roomCode ?? endTarget.sessionId} ended.`);
       setEndTarget(null);
       setActionReason("");
@@ -120,13 +131,18 @@ export default function AdminLiveOpsPage() {
 
   async function confirmKick() {
     if (!kickTarget) return;
+    const trimmed = actionReason.trim() || "Removed by staff";
+    if (trimmed.length < 3) {
+      setError("Enter a reason (min 3 characters).");
+      return;
+    }
     setBusy(true);
     try {
       await kickAdminParticipant(
         token,
         kickTarget.sessionId,
         kickTarget.actorId,
-        actionReason.trim() || "Removed by staff",
+        trimmed,
       );
       setNotice(`Removed ${kickTarget.nickname} from room.`);
       setKickTarget(null);
@@ -141,20 +157,14 @@ export default function AdminLiveOpsPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-wrap items-center justify-between gap-4">
+      <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Live Ops &amp; Kill-Switches</h1>
           <p className="mt-1 text-xs text-[var(--text-muted)]">
             Monitor active multiplayer rooms, inspect sessions, toggle emergency switches, and set maintenance notices.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="inline-flex min-h-9 items-center gap-1.5 rounded-sm border border-white/20 px-3 text-xs font-bold uppercase text-[var(--text-secondary)] hover:text-white"
-        >
-          <RefreshCw size={13} /> Refresh
-        </button>
+        <AdminRefreshButton tabKey="live" onRefresh={load} />
       </header>
 
       {error && (
@@ -168,83 +178,104 @@ export default function AdminLiveOpsPage() {
         </div>
       )}
 
-      {live && (
-        <div className="grid gap-4 sm:grid-cols-4">
-          <div className="rounded-md border border-white/15 bg-[#121628] p-4">
-            <p className="text-[11px] uppercase text-[var(--text-muted)]">Active Matches</p>
-            <p className="mt-1 text-2xl font-bold">{live.summary.activeRooms}</p>
-          </div>
-          <div className="rounded-md border border-white/15 bg-[#121628] p-4">
-            <p className="text-[11px] uppercase text-[var(--text-muted)]">Lobby Rooms</p>
-            <p className="mt-1 text-2xl font-bold">{live.summary.lobbyRooms}</p>
-          </div>
-          <div className="rounded-md border border-white/15 bg-[#121628] p-4">
-            <p className="text-[11px] uppercase text-[var(--text-muted)]">Connected Sockets</p>
-            <p className="mt-1 text-2xl font-bold">{live.summary.connectedSockets}</p>
-          </div>
-          <div className="rounded-md border border-white/15 bg-[#121628] p-4">
-            <p className="text-[11px] uppercase text-[var(--text-muted)]">Live Solo Sessions</p>
-            <p className="mt-1 text-2xl font-bold">{live.summary.liveSoloSessions}</p>
-          </div>
-        </div>
-      )}
-
-      {live && (
-        <AdminTable
-          caption="Active Multiplayer Rooms (Lobby & Running)"
-          rows={live.rooms}
-          rowKey={(r) => r.sessionId}
-          rowHeaderLabel="Room"
-          rowHeader={(r) => (
-            <div>
-              <p className="font-mono font-bold text-[var(--accent-highlight)]">{r.roomCode ?? "—"}</p>
-              <p className="text-[11px] font-normal text-[var(--text-muted)]">{r.playsetTitle}</p>
+      {/* Fixed-height KPI Strip prevents layout shift while loading */}
+      <div className="grid gap-4 sm:grid-cols-4">
+        {live ? (
+          <>
+            <div className="h-[88px] rounded-md border border-white/15 bg-[#121628] p-4">
+              <p className="text-[11px] uppercase text-[var(--text-muted)]">Active Matches</p>
+              <p className="mt-1 text-2xl font-bold tabular-nums">{live.summary.activeRooms}</p>
             </div>
-          )}
-          columns={[
-            { key: "mode", label: "Mode", render: (r) => r.mode },
-            { key: "status", label: "Phase", render: (r) => `${r.status} (${r.phase})` },
-            {
-              key: "players",
-              label: "Players",
-              render: (r) => `${r.playerCount}p / ${r.spectatorCount}w (${r.connectedPlayers} live)`,
-            },
-            {
-              key: "participants",
-              label: "Participants",
-              render: (r) => (
-                <div className="flex flex-wrap gap-1.5">
-                  {r.participants.map((p) => (
-                    <button
-                      key={p.actorId}
-                      type="button"
-                      onClick={() => setKickTarget({ sessionId: r.sessionId, actorId: p.actorId, nickname: p.nickname })}
-                      className="inline-flex items-center gap-1 rounded border border-white/15 bg-black/25 px-1.5 py-0.5 text-[10px] hover:border-red-400/50 hover:text-red-200"
-                    >
-                      {p.nickname}
-                      <UserX size={10} />
-                    </button>
-                  ))}
-                </div>
-              ),
-            },
-            {
-              key: "action",
-              label: "Control",
-              align: "right",
-              render: (r) => (
-                <button
-                  type="button"
-                  onClick={() => setEndTarget({ sessionId: r.sessionId, roomCode: r.roomCode })}
-                  className="inline-flex items-center gap-1 rounded bg-red-600 px-2.5 py-1 text-[10px] font-bold uppercase text-white"
-                >
-                  <ShieldOff size={11} /> Force-End
-                </button>
-              ),
-            },
-          ]}
-        />
-      )}
+            <div className="h-[88px] rounded-md border border-white/15 bg-[#121628] p-4">
+              <p className="text-[11px] uppercase text-[var(--text-muted)]">Lobby Rooms</p>
+              <p className="mt-1 text-2xl font-bold tabular-nums">{live.summary.lobbyRooms}</p>
+            </div>
+            <div className="h-[88px] rounded-md border border-white/15 bg-[#121628] p-4">
+              <p className="text-[11px] uppercase text-[var(--text-muted)]">Connected Sockets</p>
+              <p className="mt-1 text-2xl font-bold tabular-nums">{live.summary.connectedSockets}</p>
+            </div>
+            <div className="h-[88px] rounded-md border border-white/15 bg-[#121628] p-4">
+              <p className="text-[11px] uppercase text-[var(--text-muted)]">Live Solo Sessions</p>
+              <p className="mt-1 text-2xl font-bold tabular-nums">{live.summary.liveSoloSessions}</p>
+            </div>
+          </>
+        ) : (
+          [0, 1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="h-[88px] animate-pulse rounded-md border border-white/10 bg-[#121628]"
+            />
+          ))
+        )}
+      </div>
+
+      {/* Always mounted to prevent layout shift */}
+      <AdminTable
+        caption="Active Multiplayer Rooms (Lobby & Running)"
+        loading={!live || loading}
+        loadingMessage="Loading active rooms…"
+        emptyMessage="No active multiplayer rooms right now."
+        rows={live?.rooms ?? []}
+        rowKey={(r) => r.sessionId}
+        rowHeaderLabel="Room"
+        rowHeader={(r) => (
+          <div>
+            <p className="font-mono font-bold text-[var(--accent-highlight)]">{r.roomCode ?? "—"}</p>
+            <p className="text-[11px] font-normal text-[var(--text-muted)]">{r.playsetTitle}</p>
+          </div>
+        )}
+        columns={[
+          { key: "mode", label: "Mode", render: (r) => r.mode },
+          {
+            key: "status",
+            label: "Phase",
+            render: (r) => (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <StatusBadge value={r.status} />
+                {r.phase !== r.status && <StatusBadge value={r.phase} />}
+              </div>
+            ),
+          },
+          {
+            key: "players",
+            label: "Players",
+            render: (r) => `${r.playerCount}p / ${r.spectatorCount}w (${r.connectedPlayers} live)`,
+          },
+          {
+            key: "participants",
+            label: "Participants",
+            render: (r) => (
+              <div className="flex flex-wrap gap-1.5">
+                {r.participants.map((p) => (
+                  <button
+                    key={p.actorId}
+                    type="button"
+                    onClick={() => setKickTarget({ sessionId: r.sessionId, actorId: p.actorId, nickname: p.nickname })}
+                    className="inline-flex items-center gap-1 rounded border border-white/15 bg-black/25 px-1.5 py-0.5 text-[10px] hover:border-red-400/50 hover:text-red-200"
+                  >
+                    {p.nickname}
+                    <UserX size={10} />
+                  </button>
+                ))}
+              </div>
+            ),
+          },
+          {
+            key: "action",
+            label: "Control",
+            align: "right",
+            render: (r) => (
+              <button
+                type="button"
+                onClick={() => setEndTarget({ sessionId: r.sessionId, roomCode: r.roomCode })}
+                className="inline-flex items-center gap-1 rounded bg-red-600 px-2.5 py-1 text-[10px] font-bold uppercase text-white hover:brightness-110"
+              >
+                <ShieldOff size={11} /> Force-End
+              </button>
+            ),
+          },
+        ]}
+      />
 
       <div className="grid gap-6 lg:grid-cols-2">
         {isAdmin && (
@@ -341,9 +372,10 @@ export default function AdminLiveOpsPage() {
 
           {lookupResult && (
             <div className="space-y-2 rounded border border-white/10 bg-black/25 p-3 text-xs">
-              <p className="font-bold text-white">
-                {lookupResult.kind} · {lookupResult.mode} · {lookupResult.status}
-              </p>
+              <div className="flex flex-wrap items-center gap-2 font-bold text-white">
+                <span>{lookupResult.kind} · {lookupResult.mode}</span>
+                <StatusBadge value={lookupResult.status} />
+              </div>
               <p className="text-[var(--text-muted)]">
                 Playset: {lookupResult.playsetTitle} · Code: {lookupResult.roomCode ?? "solo"}
               </p>
@@ -368,12 +400,12 @@ export default function AdminLiveOpsPage() {
       >
         <div className="space-y-4 text-xs">
           <p className="text-[var(--text-secondary)]">
-            Connected players will be immediately disconnected and the room marked CANCELLED.
+            Connected players will see that an administrator ended the room along with the reason you enter below.
           </p>
           <input
             value={actionReason}
             onChange={(e) => setActionReason(e.target.value)}
-            placeholder="Reason (required)"
+            placeholder="Reason shown to participants (required)"
             className="w-full rounded-sm border border-white/20 bg-[#0b0d17] px-3 py-2 text-sm text-white"
           />
           <div className="flex justify-end gap-2">
@@ -395,12 +427,12 @@ export default function AdminLiveOpsPage() {
       >
         <div className="space-y-4 text-xs">
           <p className="text-[var(--text-secondary)]">
-            Immediately revokes their room credential and disconnects their WebSocket.
+            Immediately revokes their room credential, disconnects their WebSocket, and shows them the administrator removal reason.
           </p>
           <input
             value={actionReason}
             onChange={(e) => setActionReason(e.target.value)}
-            placeholder="Reason (required)"
+            placeholder="Reason shown to participant (required)"
             className="w-full rounded-sm border border-white/20 bg-[#0b0d17] px-3 py-2 text-sm text-white"
           />
           <div className="flex justify-end gap-2">

@@ -96,6 +96,27 @@ body {
   overflow-x: hidden;
 }
 
+@layer base {
+  button:not(:disabled),
+  a[href],
+  [role="button"]:not([aria-disabled="true"]),
+  [role="tab"],
+  select:not(:disabled),
+  summary,
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled),
+  label:has(> input[type="checkbox"]:not(:disabled)),
+  label:has(> input[type="radio"]:not(:disabled)) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  select:disabled,
+  input:disabled {
+    cursor: not-allowed;
+  }
+}
+
 /* ─── Scrollbar ──────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 5px;
@@ -1299,6 +1320,39 @@ dialog::backdrop {
   color: var(--text-muted);
   border-block-end: 1px solid rgba(255, 255, 255, 0.12);
   white-space: nowrap;
+}
+
+.admin-table-wrapper thead th:has(> button) {
+  padding: 0;
+}
+
+.admin-table-wrapper thead th > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  inline-size: 100%;
+  min-block-size: 2.25rem;
+  padding: 0.65rem 0.9rem;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+
+.admin-table-wrapper thead th.text-right > button {
+  justify-content: flex-end;
+}
+
+.admin-table-wrapper thead th > button:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.admin-table-wrapper thead th[aria-sort] > button {
+  color: var(--accent-highlight);
 }
 
 .admin-table-wrapper tbody th,

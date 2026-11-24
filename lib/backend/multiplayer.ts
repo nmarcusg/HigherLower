@@ -64,6 +64,39 @@ export interface MultiplayerSnapshot {
   readOnly?: boolean;
   answeredCount?: number;
   totalAnswerers?: number;
+  endedBy?: "HOST" | "ADMIN" | "EXPIRED" | null;
+  endReason?: string | null;
+}
+
+export interface RoomPreview {
+  sessionId: string;
+  roomCode: string;
+  status: "LOBBY" | "RUNNING" | "FINALIZING" | "CANCELLED" | "FINISHED";
+  phase: string;
+  mode: string;
+  playsetId: string;
+  playsetTitle: string | null;
+  metricName: string | null;
+  hostNickname: string | null;
+  playerCount: number;
+  spectatorCount: number;
+  minPlayers: number;
+  maxPlayers: number;
+  joinableAsPlayer: boolean;
+  watchable: boolean;
+  endedBy: "HOST" | "ADMIN" | "EXPIRED" | null;
+  endReason: string | null;
+  settings: {
+    roundCount?: number;
+    answerTimeSeconds?: number;
+    matchDurationMinutes?: number;
+  };
+  currentRound: number;
+  totalRounds: number;
+  topScore: number | null;
+  leaders: Array<{ nickname: string; score: number; eliminated: boolean }>;
+  createdAt: string;
+  startedAt: string | null;
 }
 
 export interface StoredRoomCredential extends RoomCredential {
@@ -204,6 +237,34 @@ export function kickRoomPlayer(credential: RoomCredential, actorId: string): Pro
 /** Host-only manual transfer of host privileges to another player in the lobby. */
 export function transferRoomHost(credential: RoomCredential, actorId: string): Promise<MultiplayerSnapshot> {
   return roomRequest(credential, "/transfer-host", "POST", { actorId });
+}
+
+/** Switch the signed-in room participant between Playing and Spectating in the lobby. */
+export function setLobbyRole(credential: RoomCredential, role: "PLAYER" | "SPECTATOR"): Promise<MultiplayerSnapshot> {
+  return roomRequest(credential, "/role", "POST", { role });
+}
+
+/** Public pre-join stats lookup by room code (QA-27). */
+export async function previewRoomByCode(code: string, signal?: AbortSignal): Promise<RoomPreview> {
+  const clean = code.trim().toUpperCase();
+  const timeoutSignal = AbortSignal.timeout(15_000);
+  const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+  const response = await fetch(`/api/backend/rooms/preview?code=${encodeURIComponent(clean)}`, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+    signal: combinedSignal,
+  });
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok || !isObject(payload)) {
+    const message = isObject(payload) && typeof payload.message === "string"
+      ? payload.message
+      : `Could not find room ${clean}.`;
+    const err = new Error(message) as Error & { status?: number };
+    err.status = response.status;
+    throw err;
+  }
+  return payload as unknown as RoomPreview;
 }
 
 export async function createSpectatorCredential(code: string, nickname: string): Promise<{ sessionId: string; roomCode: string; gameToken: string; state: MultiplayerSnapshot }> {

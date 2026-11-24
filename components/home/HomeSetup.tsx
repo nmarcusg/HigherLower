@@ -23,6 +23,7 @@ import LaunchDock from "@/components/home/LaunchDock";
 import AdSlot from "@/components/ads/AdSlot";
 import AudioSurface from "@/components/audio/AudioSurface";
 import { emitAtmosphere } from "@/lib/atmosphere/eventBus";
+import { fetchPublicSettings } from "@/lib/backend/publicSettings";
 import {
   readHomeSelection,
   resolveHomeSelection,
@@ -84,6 +85,7 @@ export default function HomeSetup({ catalog }: HomeSetupProps) {
       : category.compatibleModes[0] ?? null;
   });
   const [showScores, setShowScores] = useState(false);
+  const [soloCreateEnabled, setSoloCreateEnabled] = useState(true);
   // False until the post-mount restore attempt has run, so the default triple
   // can never overwrite a valid stored selection on the first commit.
   const [selectionRestored, setSelectionRestored] = useState(false);
@@ -189,6 +191,14 @@ export default function HomeSetup({ catalog }: HomeSetupProps) {
     emitAtmosphere({ type: "mode", mode: selectedMode, surface: "home" });
   }, [selectedMode]);
 
+  useEffect(() => {
+    void fetchPublicSettings()
+      .then((settings) => {
+        setSoloCreateEnabled(settings.features.soloCreateEnabled);
+      })
+      .catch(() => undefined);
+  }, []);
+
   const domains = useMemo<DomainOption[]>(
     () =>
       catalog.domains.map((domain) => ({
@@ -204,6 +214,7 @@ export default function HomeSetup({ catalog }: HomeSetupProps) {
     (domain) => domain.id === selectedDomainId,
   );
   const canPlay = Boolean(
+    soloCreateEnabled &&
     selectedCategory &&
     selectedCategory.playable &&
     selectedMode &&
@@ -365,51 +376,52 @@ export default function HomeSetup({ catalog }: HomeSetupProps) {
           </motion.div>
         </section>
 
-        <section
-          aria-labelledby="mode-selector-heading"
-          className="pt-[var(--space-section-tight)]"
-        >
-          <h2
-            id="mode-selector-heading"
-            className="font-bold text-4xl sm:text-5xl mb-8"
+        {/* Setup — starts at mode selection and flows into category selection. */}
+        <div ref={setupRef} id="setup" className="scroll-mt-6">
+          <section
+            aria-labelledby="mode-selector-heading"
+            className="pt-[var(--space-section-tight)]"
           >
-            How do you want to play?
-          </h2>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {MODES.map((mode) => {
-              const compatible =
-                !selectedCategory || selectedCategory.compatibleModes.includes(mode.id);
-              return (
-                <ModeButton
-                  key={mode.id}
-                  mode={mode}
-                  selected={selectedMode === mode.id}
-                  disabled={!compatible}
-                  onSelect={() => setSelectedMode(mode.id)}
-                />
-              );
-            })}
-            <Link
-              href="/multiplayer"
-              className="group relative grid min-h-28 w-full grid-cols-[auto_1fr] items-start gap-x-3 gap-y-2 p-3 text-left transition-transform duration-[140ms] ease-out hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--focus-ring)] sm:min-h-32 sm:p-4"
+            <h2
+              id="mode-selector-heading"
+              className="mb-8 text-4xl font-bold sm:text-5xl"
             >
-              <span
-                aria-hidden="true"
-                className="col-start-1 row-start-1 flex size-4 shrink-0 items-center justify-center self-center rounded-full border-2 border-white transition-colors duration-[140ms] group-hover:border-[var(--accent-classic)]"
-              />
-              <span className="col-start-2 row-start-1 text-2xl font-bold leading-tight text-white transition-[text-shadow] sm:text-4xl group-hover:[text-shadow:3px_3px_0_var(--accent-classic)] group-focus-visible:[text-shadow:2px_2px_0_var(--accent-classic)]">
-                Multiplayer
-              </span>
-              <span className="col-start-2 row-start-2 text-sm leading-relaxed text-[var(--foreground-muted)] sm:text-base">
-                Create a room or join a match with friends.
-              </span>
-            </Link>
-          </div>
-        </section>
+              How do you want to play?
+            </h2>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {MODES.map((mode) => {
+                const compatible =
+                  !selectedCategory || selectedCategory.compatibleModes.includes(mode.id);
+                return (
+                  <ModeButton
+                    key={mode.id}
+                    mode={mode}
+                    selected={selectedMode === mode.id}
+                    disabled={!compatible}
+                    onSelect={() => setSelectedMode(mode.id)}
+                  />
+                );
+              })}
+              <Link
+                href="/multiplayer"
+                className="group relative grid min-h-28 w-full grid-cols-[auto_1fr] items-start gap-x-3 gap-y-2 p-3 text-left transition-transform duration-[140ms] ease-out hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--focus-ring)] sm:min-h-32 sm:p-4"
+              >
+                <span
+                  aria-hidden="true"
+                  className="col-start-1 row-start-1 flex size-4 shrink-0 items-center justify-center self-center rounded-full border-2 border-white transition-colors duration-[140ms] group-hover:border-[var(--accent-classic)]"
+                />
+                <span className="col-start-2 row-start-1 text-2xl font-bold leading-tight text-white transition-[text-shadow] sm:text-4xl group-hover:[text-shadow:3px_3px_0_var(--accent-classic)] group-focus-visible:[text-shadow:2px_2px_0_var(--accent-classic)]">
+                  Multiplayer
+                </span>
+                <span className="col-start-2 row-start-2 text-sm leading-relaxed text-[var(--foreground-muted)] sm:text-base">
+                  Create a room or join a match with friends.
+                </span>
+              </Link>
+            </div>
+          </section>
 
-        {/* Setup — the only explicit in-page navigation destination. */}
-        <div ref={setupRef} id="setup" className="scroll-mt-4">
           <motion.div
+            className="mt-[var(--space-section-tight)] sm:mt-20"
             initial={false}
             animate={setupArrived && !prefersReducedMotion
               ? { opacity: [0.88, 1], transform: ["translateY(6px)", "translateY(0px)"] }
@@ -453,9 +465,11 @@ export default function HomeSetup({ catalog }: HomeSetupProps) {
           </button>
           {!canPlay && (
             <p className="max-w-sm text-xs text-[var(--foreground-muted)]">
-              {domains.length === 0
-                ? "Comparison categories are temporarily unavailable while their data sources are being verified."
-                : "Select an available category and game mode to play. Categories marked Unavailable are not playable yet."}
+              {!soloCreateEnabled
+                ? "Solo gameplay is temporarily paused by administrators."
+                : domains.length === 0
+                  ? "Comparison categories are temporarily unavailable while their data sources are being verified."
+                  : "Select an available category and game mode to play. Categories marked Unavailable are not playable yet."}
             </p>
           )}
         </section>
