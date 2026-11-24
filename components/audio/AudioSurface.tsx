@@ -305,9 +305,9 @@ export default function AudioSurface({ variant }: AudioSurfaceProps) {
         className="audio-surface relative inline-flex h-11 w-11 cursor-pointer items-center justify-center border border-transparent bg-transparent transition-colors hover:bg-white/10 active:bg-white/15 focus-visible:border-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-60"
       >
         {muted ? (
-          <VolumeX aria-hidden="true" size={18} strokeWidth={2} />
+          <VolumeX aria-hidden="true" size={variant === "home" ? 22 : 18} strokeWidth={2} />
         ) : (
-          <Volume2 aria-hidden="true" size={18} strokeWidth={2} />
+          <Volume2 aria-hidden="true" size={variant === "home" ? 22 : 18} strokeWidth={2} />
         )}
       </button>
 

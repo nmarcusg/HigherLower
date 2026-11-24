@@ -23,6 +23,7 @@ import {
 import { BackendApiError } from "@/lib/backend/types";
 import { emitAtmosphere } from "@/lib/atmosphere/eventBus";
 import { gameplayStatusOrigin, originFor } from "@/lib/atmosphere/delegation";
+import { shouldIgnoreGameplayShortcut } from "@/lib/game/keyboard";
 import type {
   SoloAnswerReceipt,
   SoloChoice,
@@ -73,13 +74,6 @@ function requestId(): string {
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function isIgnoredKeyTarget(event: KeyboardEvent): boolean {
-  if (document.querySelector('[role="dialog"], dialog[open], [aria-modal="true"]')) return true;
-  const target = event.target;
-  if (!(target instanceof Element)) return false;
-  return Boolean(target.closest("input, textarea, select, button, a[href], [contenteditable], [role='button']"));
-}
-
 import { writeHighScore } from "@/lib/highScores/storage";
 
 export default function BackendSoloGame({ playsetId, categoryId, categoryLabel, mode }: BackendSoloGameProps) {
@@ -100,6 +94,7 @@ export default function BackendSoloGame({ playsetId, categoryId, categoryLabel, 
   const restoreStarted = useRef(false);
   const answerLocked = useRef(false);
   const expiryRefreshPending = useRef(false);
+  const gameOverActionRef = useRef<HTMLButtonElement>(null);
   const modeTitle = mode === "classic" ? "Classic" : "Time Attack";
   const openingState = state;
   const leftItem = toGameItem(openingState?.left ?? null);
@@ -375,7 +370,14 @@ export default function BackendSoloGame({ playsetId, categoryId, categoryLabel, 
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (isIgnoredKeyTarget(event) || busy || phase !== "playing") return;
+      if (
+        shouldIgnoreGameplayShortcut(event) ||
+        busy ||
+        phase !== "playing" ||
+        state?.phase !== "AWAITING_ANSWER"
+      ) {
+        return;
+      }
       if (event.key === "ArrowUp" || event.key.toLowerCase() === "h") {
         event.preventDefault();
         void submitAnswer("HIGHER", "keyboard");
@@ -386,7 +388,13 @@ export default function BackendSoloGame({ playsetId, categoryId, categoryLabel, 
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [busy, phase, submitAnswer]);
+  }, [busy, phase, state?.phase, submitAnswer]);
+
+  useEffect(() => {
+    if (phase === "game-over") {
+      gameOverActionRef.current?.focus();
+    }
+  }, [phase]);
 
   const backHref = "/";
   const abortGame = useCallback(async () => {
@@ -428,6 +436,14 @@ export default function BackendSoloGame({ playsetId, categoryId, categoryLabel, 
   const isTerminal = phase === "game-over";
   const score = results?.score ?? displayedScore;
   const timerPercent = timeRemaining === null ? null : Math.min(100, Math.max(0, (timeRemaining / 60) * 100));
+  const soloLiveAnnouncement =
+    phase === "playing" && leftItem && rightItem
+      ? `Compare: ${leftItem.name}, ${leftItem.displayValue}. Is ${rightItem.name} higher or lower? Score: ${displayedScore}. Press Up arrow for higher or Down arrow for lower.`
+      : phase === "revealing" && rightItem
+        ? `${answerCorrect ? "Correct" : "Incorrect"}! ${rightItem.name} is ${rightItem.displayValue}. Score: ${displayedScore}.`
+        : isTerminal
+          ? `${mode === "time-attack" ? "Time's up" : "Game over"}. Final score: ${score}.`
+          : "";
 
   return (
     <GameplayShell
@@ -447,7 +463,10 @@ export default function BackendSoloGame({ playsetId, categoryId, categoryLabel, 
     >
       <div className="relative flex min-h-0 flex-1 flex-col gameplay-entrance">
         <GameplayDivider />
-        <div role="status" aria-live="polite" className={`pointer-events-none absolute inset-x-0 top-3 z-30 text-center text-xs font-bold uppercase tracking-[0.18em] transition-opacity ${phase === "revealing" ? "opacity-100" : "opacity-0"}`}>
+        <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+          {soloLiveAnnouncement}
+        </div>
+        <div aria-hidden="true" className={`pointer-events-none absolute inset-x-0 top-3 z-30 text-center text-xs font-bold uppercase tracking-[0.18em] transition-opacity ${phase === "revealing" ? "opacity-100" : "opacity-0"}`}>
           {phase === "revealing" ? (answerCorrect ? "Correct" : "Incorrect") : ""}
         </div>
         {leftItem && rightItem && (
@@ -474,8 +493,8 @@ export default function BackendSoloGame({ playsetId, categoryId, categoryLabel, 
             <p className="mb-6 text-sm text-[var(--foreground-muted)]">Your result has been saved by the game service.</p>
             <div className="mb-6 flex justify-center"><GameplayStatus value={score} label="Final score" /></div>
             <div className="flex flex-col gap-3">
-              <button onClick={() => { sessionStorage.removeItem(storageKey); setResults(null); setState(null); setCredential(null); restoreStarted.current = false; setPhase("loading"); void createFreshSession(); }} className="min-h-12 border-2 border-white bg-[var(--accent-highlight)] px-5 py-3 font-bold uppercase text-[#15122b] shadow-[5px_5px_0_#ffffff] transition-transform hover:-translate-y-1">Play again</button>
-              <Link href="/" className="flex min-h-12 items-center justify-center gap-2 border-2 border-white px-5 py-3 text-sm font-bold uppercase text-white transition-colors hover:bg-white/10"><ArrowLeft size={14} />Back to setup</Link>
+              <button ref={gameOverActionRef} onClick={() => { sessionStorage.removeItem(storageKey); setResults(null); setState(null); setCredential(null); restoreStarted.current = false; setPhase("loading"); void createFreshSession(); }} className="min-h-12 border-2 border-white bg-[var(--accent-highlight)] px-5 py-3 font-bold uppercase text-[#15122b] shadow-[5px_5px_0_#ffffff] transition-transform hover:-translate-y-1">Play again</button>
+              <Link href="/" className="flex min-h-12 items-center justify-center gap-2 border-2 border-white px-5 py-3 text-sm font-bold uppercase text-white transition-colors hover:bg-white/10"><ArrowLeft size={14} aria-hidden="true" />Back to setup</Link>
             </div>
             <AdSlot slot="postgame_card" className="mt-5" />
           </div>

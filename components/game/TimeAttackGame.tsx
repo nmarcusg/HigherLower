@@ -49,6 +49,7 @@ import {
 import { buildDeck, shuffleDeck } from "@/lib/game/deck";
 import { emitAtmosphere } from "@/lib/atmosphere/eventBus";
 import { gameplayStatusOrigin, originFor } from "@/lib/atmosphere/delegation";
+import { shouldIgnoreGameplayShortcut } from "@/lib/game/keyboard";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -86,21 +87,6 @@ interface TimeAttackGameProps {
 
 // Pad a number to 2 digits
 const pad2 = (n: number) => String(Math.max(0, Math.floor(n))).padStart(2, "0");
-
-function shouldIgnoreShortcut(e: KeyboardEvent) {
-  if (document.querySelector('[role="dialog"], dialog[open], [aria-modal="true"]')) {
-    return true;
-  }
-
-  const target = e.target;
-  if (!(target instanceof Element)) return false;
-
-  return Boolean(
-    target.closest(
-      'input, textarea, select, [contenteditable], button, a[href], summary, [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="switch"], [role="tab"], [role="menuitem"], [role="combobox"]',
-    ),
-  );
-}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -234,7 +220,7 @@ export default function TimeAttackGame({
     } else if (previousPhaseRef.current === "game-over" && phase === "playing") {
       const origin = gameOverOriginRef.current;
       const nextAction = document.querySelector<HTMLButtonElement>(
-        '[aria-label="Higher"]',
+        '[aria-keyshortcuts="ArrowUp H"]',
       );
       if (origin?.isConnected) origin.focus();
       else nextAction?.focus();
@@ -285,7 +271,7 @@ export default function TimeAttackGame({
 
       const guessOrigin = originFor(
         activeElement,
-        direction === "higher" ? '[aria-label="Higher"]' : '[aria-label="Lower"]',
+        direction === "higher" ? '[aria-keyshortcuts="ArrowUp H"]' : '[aria-keyshortcuts="ArrowDown L"]',
       );
       emitAtmosphere({
         type: "guess",
@@ -382,13 +368,15 @@ export default function TimeAttackGame({
   // ── Keyboard ───────────────────────────────────────────────────────────────
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (shouldIgnoreShortcut(e)) return;
-      if (e.key === "ArrowUp" || e.key === "h") {
+      if (shouldIgnoreGameplayShortcut(e)) return;
+      const key = e.key.toLowerCase();
+      if (e.key === "ArrowUp" || key === "h") {
+        e.preventDefault();
         guessSourceRef.current = "keyboard";
         handleGuess("higher");
         guessSourceRef.current = null;
-      }
-      if (e.key === "ArrowDown" || e.key === "l") {
+      } else if (e.key === "ArrowDown" || key === "l") {
+        e.preventDefault();
         guessSourceRef.current = "keyboard";
         handleGuess("lower");
         guessSourceRef.current = null;
@@ -500,14 +488,25 @@ export default function TimeAttackGame({
       >
         <GameplayDivider />
 
+        <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+          {phase === "playing" && currentItem && nextItem
+            ? `Compare: ${currentItem.name}, ${currentItem.displayValue}. Is ${nextItem.name} higher or lower? Score: ${displayScore}. Press Up arrow for higher or Down arrow for lower.`
+            : phase === "revealing" && tint !== null && nextItem
+              ? `${tint === "correct" ? "Correct, plus 3 seconds" : "Incorrect, minus 5 seconds"}. ${nextItem.name} is ${nextItem.displayValue}. Score: ${displayScore}.`
+              : phase === "game-over"
+                ? `Time's up. Final score: ${score}.`
+                : ""}
+        </div>
+
         <div
-          role="status"
-          aria-live="polite"
+          aria-hidden="true"
           className={`pointer-events-none absolute inset-x-0 top-2 z-30 text-center text-xs font-bold uppercase tracking-[0.18em] transition-opacity ${tint !== null ? "opacity-100" : "opacity-0"}`}
         >
           {tint === "correct"
             ? "Correct · +3 seconds"
-            : "Incorrect · −5 seconds"}
+            : tint === "incorrect"
+              ? "Incorrect · −5 seconds"
+              : ""}
         </div>
 
         <ComparisonBoard

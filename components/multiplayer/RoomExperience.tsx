@@ -31,6 +31,7 @@ import {
   type PlaysetPickerOption,
 } from "@/components/multiplayer/PlaysetPickerModal";
 import ReportPlaysetDialog from "@/components/playsets/ReportPlaysetDialog";
+import { shouldIgnoreGameplayShortcut } from "@/lib/game/keyboard";
 
 type Ack = { ok?: boolean; error?: { code?: string; message?: string }; submitted?: boolean };
 const CARD = "rounded-md border border-white/20 bg-[#1b1734]/90 p-5 shadow-[0_8px_0_var(--accent-classic)] sm:p-7";
@@ -186,6 +187,8 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
   const clockOffsetRef = useRef(0);
   const myActorIdRef = useRef("");
   const wasHostRef = useRef<boolean | null>(null);
+  const mpKeysHintId = useId();
+  const answerRef = useRef<(choice: "HIGHER" | "LOWER", source?: "pointer" | "keyboard") => void>(() => {});
   const [credential, setCredential] = useState<StoredRoomCredential | null>(null);
   const [snapshot, setSnapshot] = useState<MultiplayerSnapshot | null>(null);
   const [results, setResults] = useState<Record<string, unknown> | null>(null);
@@ -763,12 +766,12 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
     }
   }
 
-  function answer(choice: "HIGHER" | "LOWER") {
+  function answer(choice: "HIGHER" | "LOWER", source: "pointer" | "keyboard" = "pointer") {
     const socket = socketRef.current;
     if (!socket || !question.id || submitted || answering || isSpectator || phase !== "QUESTION") return;
     setAnswering(true);
     setMessage("");
-    emitAtmosphere({ type: "guess", direction: choice === "HIGHER" ? "higher" : "lower", source: "pointer", ...originFor(document.activeElement, ".gameplay-entrance-controls") });
+    emitAtmosphere({ type: "guess", direction: choice === "HIGHER" ? "higher" : "lower", source, ...originFor(document.activeElement, ".gameplay-entrance-controls") });
     const requestId = crypto.randomUUID();
     socket.timeout(5000).emit("room:answer", { questionId: question.id, choice, requestId }, (timeoutError: Error | null, ack: Ack) => {
       if (timeoutError) {
@@ -784,6 +787,39 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
       setAnswering(false);
     });
   }
+
+  useEffect(() => {
+    answerRef.current = answer;
+  });
+
+  const connected = connection === "connected";
+  const canAnswerQuestion =
+    Boolean(credential && snapshot) &&
+    (status === "RUNNING" || status === "FINALIZING") &&
+    !isSpectator &&
+    !leftMatch &&
+    phase === "QUESTION" &&
+    Boolean(question.id) &&
+    !submitted &&
+    !answering &&
+    connected;
+
+  useEffect(() => {
+    if (!canAnswerQuestion) return;
+    function onKey(event: KeyboardEvent) {
+      if (shouldIgnoreGameplayShortcut(event)) return;
+      const key = event.key.toLowerCase();
+      if (event.key === "ArrowUp" || key === "h") {
+        event.preventDefault();
+        answerRef.current("HIGHER", "keyboard");
+      } else if (event.key === "ArrowDown" || key === "l") {
+        event.preventDefault();
+        answerRef.current("LOWER", "keyboard");
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canAnswerQuestion]);
 
   const successorSessionId = asText(object(snapshot?.settings).nextSessionId);
   useEffect(() => {
@@ -808,9 +844,31 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
   }
 
   const playersForList = Array.isArray(snapshot.players) ? snapshot.players : [];
-  const connected = connection === "connected";
   const cancelled = status === "CANCELLED";
   const finished = status === "FINISHED" || phase === "FINISHED";
+  const cancelledAnnouncement =
+    snapshot?.endedBy === "ADMIN"
+      ? snapshot.endReason
+        ? `Room ended by an administrator: ${snapshot.endReason}`
+        : "Room ended by an administrator."
+      : snapshot?.endedBy === "EXPIRED"
+        ? snapshot.endReason || "Room expired."
+        : snapshot?.endReason || "The host ended this room.";
+  const mpLiveAnnouncement = cancelled
+    ? cancelledAnnouncement
+    : finished
+      ? isTrueSpectator
+        ? "Match complete. Final leaderboard is available."
+        : `Match complete. Final score: ${finalScore}.`
+      : status === "RUNNING" && phase === "QUESTION" && question.id
+        ? isSpectator
+          ? `Watching live. ${asText(left.name, "Current")} ${asText(left.displayValue, "")} vs ${asText(right.name, "Next")}.`
+          : submitted
+            ? `Answer locked for ${asText(right.name, "next item")}. Waiting for round reveal.`
+            : `${isScoreRace ? "Score Race" : currentRound > 0 ? `Round ${currentRound}${totalRounds ? ` of ${totalRounds}` : ""}` : "Round open"}. Current: ${asText(left.name)}, ${asText(left.displayValue)}. Next: ${asText(right.name)}. Score: ${score}. Press Up arrow for higher or Down arrow for lower.`
+        : status === "RUNNING" && phase === "REVEAL" && question.id
+          ? `${submittedChoice ? (answerIsCorrect ? "Correct!" : "Wrong!") : question.correctChoice ? `Correct answer: ${question.correctChoice}.` : "Answer revealed."} ${asText(right.name)} is ${asText(right.displayValue, "revealed")}. Score: ${score}.`
+          : "";
   const countdownSeconds = Math.ceil(remainingMs / 1000);
   const showMatchLoadingSpinner =
     !leftMatch &&
@@ -845,6 +903,9 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
       </header>
 
       <section className="mx-auto w-full max-w-5xl flex-1 py-9 sm:py-12">
+        <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+          {mpLiveAnnouncement}
+        </div>
         <div className="mb-8 flex flex-wrap items-end justify-between gap-5">
           <div>
             <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--accent-action-higher)]">{leftMatch ? (isHost ? "Waiting in room · Host" : "Waiting in room") : isTrueSpectator ? "Spectator view" : isHost ? "You are hosting" : "You're in"}</p>
@@ -1108,9 +1169,46 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
                       <QuestionCard item={left} label="Current" revealed />
                       <QuestionCard item={right} label="Next" revealed={revealed} />
                     </div>
-                    {phase === "QUESTION" && !isScoreRace && <div className="mt-5 grid grid-cols-2 gap-3"><button className={OUTLINE} type="button" disabled={submitted || answering || !connected} onClick={() => answer("LOWER")}><ArrowDown size={16} /> Lower</button><button className={BUTTON} type="button" disabled={submitted || answering || !connected} onClick={() => answer("HIGHER")}>{answering ? "Sending…" : submitted ? <><Check size={15} /> Answer locked</> : <><ArrowUp size={16} /> Higher</>}</button></div>}
-                    {phase === "QUESTION" && isScoreRace && <div className="mt-5 grid grid-cols-2 gap-3"><button className={OUTLINE} type="button" disabled={submitted || answering || !connected} onClick={() => answer("LOWER")}><ArrowDown size={16} /> Lower</button><button className={BUTTON} type="button" disabled={submitted || answering || !connected} onClick={() => answer("HIGHER")}>{answering ? "Sending…" : submitted ? <><Check size={15} /> Answer locked</> : <><ArrowUp size={16} /> Higher</>}</button></div>}
-                    {revealed && <div className="mt-5 rounded-sm border border-[var(--accent-highlight)]/30 bg-[var(--accent-highlight)]/10 p-4 text-center"><p className={`text-xs font-bold uppercase tracking-[0.16em] ${submittedChoice ? answerIsCorrect ? "text-[var(--status-success)] animate-[fadeInScale_0.35s_ease-out]" : "text-[var(--status-error)] animate-[shake_0.4s_ease-out]" : "text-[var(--accent-highlight)] animate-[fadeInUp_0.3s_ease-out]"}`}>{submittedChoice ? answerIsCorrect ? "Correct!" : "Wrong!" : question.correctChoice ? `Correct answer: ${question.correctChoice}` : "Answer revealed"}</p><p className="mt-1 text-sm text-white">{question.correctChoice ? `Correct answer: ${question.correctChoice} · ` : ""}{asText(right.displayValue, "The comparison has been revealed")}</p></div>}
+                    {phase === "QUESTION" && (
+                      <div className="gameplay-entrance-controls mt-5">
+                        <div className="grid grid-cols-2 gap-3">
+                          <button
+                            className={OUTLINE}
+                            type="button"
+                            disabled={submitted || answering || !connected}
+                            aria-keyshortcuts="ArrowDown L"
+                            aria-describedby={mpKeysHintId}
+                            onClick={() => answer("LOWER")}
+                          >
+                            <ArrowDown size={16} aria-hidden="true" /> Lower
+                          </button>
+                          <button
+                            className={BUTTON}
+                            type="button"
+                            disabled={submitted || answering || !connected}
+                            aria-keyshortcuts="ArrowUp H"
+                            aria-describedby={mpKeysHintId}
+                            onClick={() => answer("HIGHER")}
+                          >
+                            {answering ? (
+                              "Sending…"
+                            ) : submitted ? (
+                              <>
+                                <Check size={15} aria-hidden="true" /> Answer locked
+                              </>
+                            ) : (
+                              <>
+                                <ArrowUp size={16} aria-hidden="true" /> Higher
+                              </>
+                            )}
+                          </button>
+                        </div>
+                        <p id={mpKeysHintId} className="mt-2.5 text-center text-[11px] text-[var(--text-muted)]">
+                          Keys: ↑ (or H) Higher · ↓ (or L) Lower
+                        </p>
+                      </div>
+                    )}
+                    {revealed && <div aria-hidden="true" className="mt-5 rounded-sm border border-[var(--accent-highlight)]/30 bg-[var(--accent-highlight)]/10 p-4 text-center"><p className={`text-xs font-bold uppercase tracking-[0.16em] ${submittedChoice ? answerIsCorrect ? "text-[var(--status-success)] animate-[fadeInScale_0.35s_ease-out]" : "text-[var(--status-error)] animate-[shake_0.4s_ease-out]" : "text-[var(--accent-highlight)] animate-[fadeInUp_0.3s_ease-out]"}`}>{submittedChoice ? answerIsCorrect ? "Correct!" : "Wrong!" : question.correctChoice ? `Correct answer: ${question.correctChoice}` : "Answer revealed"}</p><p className="mt-1 text-sm text-white">{question.correctChoice ? `Correct answer: ${question.correctChoice} · ` : ""}{asText(right.displayValue, "The comparison has been revealed")}</p></div>}
                   </>}
                 </>
               )}
@@ -1624,9 +1722,9 @@ function QuestionCard({ item, label, revealed }: { item: Record<string, unknown>
   const imageUrl = typeof item.imageUrl === "string" ? item.imageUrl : null;
   const attribution = typeof item.attribution === "string" ? item.attribution : null;
   const optimizable = imageUrl ? isOptimizableImageUrl(imageUrl) : false;
-  return <div className="relative flex min-h-52 flex-col justify-end overflow-hidden rounded-sm border border-white/15 bg-[#15122b] p-4 sm:min-h-64">{imageUrl && <Image src={imageUrl} alt="" fill priority unoptimized={!optimizable} className="object-cover opacity-25" sizes="(max-width: 640px) 100vw, 480px" />}
+  return <article aria-label={`${label}: ${asText(item.name, "Loading comparison")}`} className="relative flex min-h-52 flex-col justify-end overflow-hidden rounded-sm border border-white/15 bg-[#15122b] p-4 sm:min-h-64">{imageUrl && <Image src={imageUrl} alt="" fill priority unoptimized={!optimizable} className="object-cover opacity-25" sizes="(max-width: 640px) 100vw, 480px" />}
     <div className="relative z-10"><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-action-higher)]">{label}</p><h3 className="mt-2 text-xl font-bold text-white sm:text-2xl">{asText(item.name, "Loading comparison…")}</h3>{revealed && <p className="mt-3 text-2xl font-black text-[var(--accent-highlight)]">{asText(item.displayValue, "")}</p>}{attribution && <p className="mt-2 text-[10px] leading-snug text-white/75">Image: {attribution}</p>}</div>
-  </div>;
+  </article>;
 }
 
 function Leaderboard({ snapshot, entries, isSpectator, results, matchRemainingMs }: { snapshot: MultiplayerSnapshot; entries: Array<Record<string, unknown>>; isSpectator: boolean; results?: Record<string, unknown> | null; matchRemainingMs: number }) {

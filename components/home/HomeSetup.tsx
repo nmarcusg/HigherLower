@@ -290,7 +290,7 @@ export default function HomeSetup({ catalog }: HomeSetupProps) {
       data-ambient={ambient}
       className="relative isolate flex min-h-dvh flex-col overflow-x-clip bg-grid px-[var(--space-page)]"
     >
-      <header className="absolute right-[var(--space-page)] top-5 z-10 flex items-center gap-2">
+      <header className="ui-scale-120 absolute right-[var(--space-page)] top-5 z-10 flex flex-wrap items-center justify-end gap-2">
         <AudioSurface variant="home" />
         <Link
           href="/studio"
@@ -318,7 +318,7 @@ export default function HomeSetup({ catalog }: HomeSetupProps) {
           aria-label="View High Scores"
           className="inline-flex min-h-11 cursor-pointer items-center gap-2 border border-transparent px-3 text-xs text-[var(--foreground-muted)] transition-colors hover:bg-white/10 hover:text-white active:bg-white/15 focus-visible:border-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring)]"
         >
-          <Trophy size={17} aria-hidden="true" />
+          <Trophy size={20} aria-hidden="true" />
           <span>High Scores</span>
         </button>
       </header>
@@ -477,7 +477,7 @@ export default function HomeSetup({ catalog }: HomeSetupProps) {
         <AdSlot slot="home_banner" className="mb-10" />
       </div>
 
-      <footer className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border-subtle)] py-4 text-[0.65rem] text-[var(--foreground-muted)]">
+      <footer className="ui-scale-120 mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border-subtle)] py-4 text-[0.78rem] text-[var(--foreground-muted)]">
         <span>© {new Date().getFullYear()} Higher or Lower</span>
         <nav aria-label="Legal links" className="flex flex-wrap items-center gap-4">
           <Link href="/playsets" className="hover:text-white">

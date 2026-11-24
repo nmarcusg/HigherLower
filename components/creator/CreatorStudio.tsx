@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import Image from "next/image";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Archive,
@@ -58,6 +57,12 @@ type ItemDraft = {
   imageUrl: string;
   mediaId: string | null;
   uploading?: boolean;
+  uploadStatus?: "idle" | "uploading" | "uploaded" | "error";
+  uploadFileName?: string;
+  uploadMeta?: string;
+  uploadError?: string;
+  previewUrl?: string;
+  previewBroken?: boolean;
 };
 
 type Template = {
@@ -198,6 +203,15 @@ export default function CreatorStudio() {
 
   const [handleInput, setHandleInput] = useState("");
   const [editingHandle, setEditingHandle] = useState(false);
+  const previewUrlsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const urls = previewUrlsRef.current;
+    return () => {
+      urls.forEach((url) => URL.revokeObjectURL(url));
+      urls.clear();
+    };
+  }, []);
 
   useEffect(() => {
     void fetchPublicSettings().then(setPublicSettings);
@@ -308,31 +322,95 @@ export default function CreatorStudio() {
   async function handleFileUpload(index: number, file: File | undefined) {
     if (!token || !file) return;
     clearFeedback();
+    const objectUrl = URL.createObjectURL(file);
+    previewUrlsRef.current.add(objectUrl);
+
     setItems((current) =>
-      current.map((item, idx) => (idx === index ? { ...item, uploading: true } : item)),
+      current.map((item, idx) => {
+        if (idx !== index) return item;
+        if (item.previewUrl) {
+          URL.revokeObjectURL(item.previewUrl);
+          previewUrlsRef.current.delete(item.previewUrl);
+        }
+        return {
+          ...item,
+          uploading: true,
+          uploadStatus: "uploading",
+          uploadFileName: file.name,
+          uploadMeta: undefined,
+          uploadError: "",
+          previewUrl: objectUrl,
+          previewBroken: false,
+        };
+      }),
     );
+
     try {
       const uploaded = await uploadCreatorImage(token, file);
+      URL.revokeObjectURL(objectUrl);
+      previewUrlsRef.current.delete(objectUrl);
+      const kb = Math.max(1, Math.round(uploaded.byteSize / 1024));
+      const meta = `${uploaded.width}×${uploaded.height} · ${kb} KB WebP`;
       setItems((current) =>
         current.map((item, idx) =>
           idx === index
-            ? { ...item, mediaId: uploaded.id, imageUrl: uploaded.publicUrl, uploading: false }
+            ? {
+                ...item,
+                mediaId: uploaded.id,
+                imageUrl: uploaded.publicUrl,
+                previewUrl: undefined,
+                previewBroken: false,
+                uploading: false,
+                uploadStatus: "uploaded",
+                uploadFileName: file.name,
+                uploadMeta: meta,
+                uploadError: "",
+              }
             : item,
         ),
       );
+      setMessage(`Image "${file.name}" received and attached to item #${index + 1}.`);
     } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : "Could not upload image.");
+      URL.revokeObjectURL(objectUrl);
+      previewUrlsRef.current.delete(objectUrl);
+      const errMsg = uploadError instanceof Error ? uploadError.message : "Could not upload image.";
+      setError(`Item #${index + 1} image upload failed: ${errMsg}`);
       setItems((current) =>
-        current.map((item, idx) => (idx === index ? { ...item, uploading: false } : item)),
+        current.map((item, idx) =>
+          idx === index
+            ? {
+                ...item,
+                uploading: false,
+                previewUrl: undefined,
+                uploadStatus: "error",
+                uploadError: errMsg,
+              }
+            : item,
+        ),
       );
     }
   }
 
   function clearItemImage(index: number) {
     setItems((current) =>
-      current.map((item, idx) =>
-        idx === index ? { ...item, mediaId: null, imageUrl: "" } : item,
-      ),
+      current.map((item, idx) => {
+        if (idx !== index) return item;
+        if (item.previewUrl) {
+          URL.revokeObjectURL(item.previewUrl);
+          previewUrlsRef.current.delete(item.previewUrl);
+        }
+        return {
+          ...item,
+          mediaId: null,
+          imageUrl: "",
+          previewUrl: undefined,
+          previewBroken: false,
+          uploadStatus: "idle",
+          uploadFileName: undefined,
+          uploadMeta: undefined,
+          uploadError: undefined,
+        };
+      }),
     );
   }
 
@@ -1038,24 +1116,39 @@ export default function CreatorStudio() {
                     </button>
 
                     <div className="flex flex-wrap items-center gap-3 pt-1 sm:col-span-full">
-                      {item.imageUrl ? (
-                        <div className="relative size-11 shrink-0 overflow-hidden rounded-sm border border-white/20 bg-black/30">
-                          <Image
-                            src={item.imageUrl}
-                            alt=""
-                            fill
-                            unoptimized
-                            sizes="44px"
-                            className="object-cover"
+                      {(item.previewUrl || item.imageUrl) && !item.previewBroken ? (
+                        <div className="relative size-12 shrink-0 overflow-hidden rounded-sm border border-white/25 bg-black/30">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={item.previewUrl || item.imageUrl}
+                            alt={item.name ? `${item.name} preview` : `Item ${index + 1} preview`}
+                            className="h-full w-full object-cover"
+                            onError={() =>
+                              setItems((current) =>
+                                current.map((entry, idx) =>
+                                  idx === index ? { ...entry, previewBroken: true } : entry,
+                                ),
+                              )
+                            }
                           />
+                        </div>
+                      ) : (item.previewUrl || item.imageUrl) && item.previewBroken ? (
+                        <div className="grid size-12 shrink-0 place-items-center rounded-sm border border-amber-400/35 bg-amber-950/30 px-1 text-center text-[9px] font-bold text-amber-200">
+                          Preview failed
                         </div>
                       ) : null}
 
-                      <label className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-sm border border-white/20 bg-white/[0.04] px-3 text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-secondary)] transition hover:border-white/50 hover:text-white">
+                      <label
+                        className={`inline-flex min-h-9 items-center gap-1.5 rounded-sm border border-white/20 bg-white/[0.04] px-3 text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-secondary)] transition ${
+                          item.uploading || readOnly || busy || !publicSettings.features.creatorUploadEnabled
+                            ? "cursor-not-allowed opacity-50"
+                            : "cursor-pointer hover:border-white/50 hover:text-white"
+                        }`}
+                      >
                         {item.uploading ? (
-                          <LoaderCircle size={13} className="animate-spin" />
+                          <LoaderCircle size={13} className="animate-spin" aria-hidden="true" />
                         ) : (
-                          <ImagePlus size={13} />
+                          <ImagePlus size={13} aria-hidden="true" />
                         )}
                         {item.uploading
                           ? "Uploading…"
@@ -1079,10 +1172,54 @@ export default function CreatorStudio() {
                         <button
                           type="button"
                           onClick={() => clearItemImage(index)}
-                          className="inline-flex items-center gap-1 text-[11px] text-[var(--text-muted)] hover:text-red-300"
+                          className="inline-flex cursor-pointer items-center gap-1 text-[11px] text-[var(--text-muted)] hover:text-red-300"
                         >
-                          <X size={12} /> Remove image
+                          <X size={12} aria-hidden="true" /> Remove image
                         </button>
+                      )}
+
+                      {item.uploadStatus === "uploading" && (
+                        <span
+                          role="status"
+                          aria-live="polite"
+                          className="inline-flex items-center gap-1.5 rounded-sm border border-sky-400/35 bg-sky-950/40 px-2.5 py-1 text-[11px] text-sky-200"
+                        >
+                          <LoaderCircle size={12} className="animate-spin" aria-hidden="true" />
+                          Uploading {item.uploadFileName || "image"}…
+                        </span>
+                      )}
+
+                      {item.uploadStatus === "uploaded" && (
+                        <span
+                          role="status"
+                          aria-live="polite"
+                          className="inline-flex items-center gap-1.5 rounded-sm border border-emerald-400/40 bg-emerald-950/40 px-2.5 py-1 text-[11px] font-bold text-emerald-200"
+                        >
+                          <Check size={12} aria-hidden="true" />
+                          Image received
+                          {item.uploadFileName ? `: ${item.uploadFileName}` : ""}
+                          {item.uploadMeta ? ` (${item.uploadMeta})` : ""}
+                        </span>
+                      )}
+
+                      {item.uploadStatus !== "uploaded" &&
+                        item.uploadStatus !== "uploading" &&
+                        item.uploadStatus !== "error" &&
+                        item.imageUrl && (
+                          <span className="inline-flex items-center gap-1 text-[11px] text-emerald-300/85">
+                            <Check size={12} aria-hidden="true" />
+                            Image attached
+                          </span>
+                        )}
+
+                      {item.uploadStatus === "error" && item.uploadError && (
+                        <span
+                          role="alert"
+                          className="inline-flex items-center gap-1.5 rounded-sm border border-red-400/40 bg-red-950/40 px-2.5 py-1 text-[11px] text-red-200"
+                        >
+                          <CircleAlert size={12} aria-hidden="true" />
+                          {item.uploadError}
+                        </span>
                       )}
                     </div>
                   </div>
