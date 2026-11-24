@@ -27,6 +27,7 @@ import {
   Users,
   X,
 } from "lucide-react";
+import GoogleSignInButton from "@/components/auth/GoogleSignInButton";
 import { getSupabaseBrowserClient } from "@/lib/backend/creator";
 import {
   AdminApiError,
@@ -80,6 +81,8 @@ export default function AdminShell({ children }: { children: ReactNode }) {
   const [verifying, setVerifying] = useState(false);
   const [copiedId, setCopiedId] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [oauthBusy, setOauthBusy] = useState(false);
+  const [oauthError, setOauthError] = useState("");
 
   const checkStaff = useCallback(async (jwt: string) => {
     setVerifying(true);
@@ -125,12 +128,18 @@ export default function AdminShell({ children }: { children: ReactNode }) {
     return () => listener.subscription.unsubscribe();
   }, [checkStaff, supabase]);
 
-  async function signIn(provider: "discord" | "google") {
+  async function signInDiscord() {
     if (!supabase) return;
-    await supabase.auth.signInWithOAuth({
-      provider,
+    setOauthBusy(true);
+    setOauthError("");
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "discord",
       options: { redirectTo: `${window.location.origin}/admin` },
     });
+    if (error) {
+      setOauthBusy(false);
+      setOauthError(error.message);
+    }
   }
 
   async function signOut() {
@@ -178,19 +187,29 @@ export default function AdminShell({ children }: { children: ReactNode }) {
           <div className="mt-6 space-y-3">
             <button
               type="button"
-              onClick={() => void signIn("discord")}
-              className="flex min-h-11 w-full items-center justify-center rounded-sm bg-[#5865F2] px-4 text-xs font-bold uppercase tracking-[0.1em] text-white hover:brightness-110"
+              disabled={oauthBusy}
+              onClick={() => void signInDiscord()}
+              className="flex min-h-11 w-full items-center justify-center rounded-sm bg-[#5865F2] px-4 text-xs font-bold uppercase tracking-[0.1em] text-white hover:brightness-110 disabled:opacity-50"
             >
               Continue with Discord
             </button>
-            <button
-              type="button"
-              onClick={() => void signIn("google")}
-              className="flex min-h-11 w-full items-center justify-center rounded-sm bg-white px-4 text-xs font-bold uppercase tracking-[0.1em] text-[#15122b] hover:brightness-95"
-            >
-              Continue with Google
-            </button>
+            <GoogleSignInButton
+              supabase={supabase}
+              redirectPath="/admin"
+              disabled={oauthBusy}
+              onBusyChange={setOauthBusy}
+              onError={setOauthError}
+              fallbackClassName="flex min-h-11 w-full items-center justify-center rounded-sm bg-white px-4 text-xs font-bold uppercase tracking-[0.1em] text-[#15122b] hover:brightness-95 disabled:opacity-50"
+            />
           </div>
+          {oauthError && (
+            <p
+              role="alert"
+              className="mt-4 rounded-sm border border-red-400/40 bg-red-950/30 p-3 text-xs text-red-200"
+            >
+              {oauthError}
+            </p>
+          )}
           <div className="mt-5 border-t border-white/10 pt-4 text-center">
             <Link href="/" className="text-xs text-[var(--text-muted)] hover:text-white">
               Return to public site

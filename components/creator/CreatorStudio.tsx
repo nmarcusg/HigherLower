@@ -45,6 +45,7 @@ import {
   type CreatorProfile,
   type PlaysetVisibility,
 } from "@/lib/backend/creator";
+import GoogleSignInButton from "@/components/auth/GoogleSignInButton";
 import { DEFAULT_PUBLIC_SETTINGS, fetchPublicSettings, type PublicSettings } from "@/lib/backend/publicSettings";
 import NativeModalDialog from "@/components/ui/NativeModalDialog";
 
@@ -595,12 +596,12 @@ export default function CreatorStudio() {
     resetEditor();
   }
 
-  async function signInWithProvider(provider: "discord" | "google") {
+  async function signInWithDiscord() {
     if (!supabase) return;
     setBusy(true);
     setOauthError("");
     const { error: authErr } = await supabase.auth.signInWithOAuth({
-      provider,
+      provider: "discord",
       options: { redirectTo: `${window.location.origin}/studio` },
     });
     if (authErr) {
@@ -650,21 +651,20 @@ export default function CreatorStudio() {
             <button
               type="button"
               disabled={busy}
-              onClick={() => void signInWithProvider("discord")}
+              onClick={() => void signInWithDiscord()}
               className="inline-flex min-h-12 items-center justify-center gap-2.5 rounded-sm bg-[#5865F2] px-5 text-xs font-bold uppercase tracking-[0.1em] text-white transition hover:brightness-110 disabled:opacity-50"
             >
               {busy ? <LoaderCircle size={15} className="animate-spin" /> : null}
               Continue with Discord
             </button>
-            <button
-              type="button"
+            <GoogleSignInButton
+              supabase={supabase}
+              redirectPath="/studio"
               disabled={busy}
-              onClick={() => void signInWithProvider("google")}
-              className="inline-flex min-h-12 items-center justify-center gap-2.5 rounded-sm border border-white/80 bg-white px-5 text-xs font-bold uppercase tracking-[0.1em] text-[#15122b] transition hover:brightness-95 disabled:opacity-50"
-            >
-              {busy ? <LoaderCircle size={15} className="animate-spin" /> : null}
-              Continue with Google
-            </button>
+              onBusyChange={setBusy}
+              onError={setOauthError}
+              fallbackClassName="inline-flex min-h-12 w-full items-center justify-center gap-2.5 rounded-sm border border-white/80 bg-white px-5 text-xs font-bold uppercase tracking-[0.1em] text-[#15122b] transition hover:brightness-95 disabled:opacity-50"
+            />
           </div>
 
           {oauthError && (

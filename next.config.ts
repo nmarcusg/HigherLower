@@ -86,6 +86,19 @@ const nextConfig: NextConfig = {
     // unknown edge variations without crashing.
     // ─────────────────────────────────────────────────────────────────────────
   },
+  async headers() {
+    return [
+      {
+        source: "/(.*)",
+        headers: [
+          // Allows Google Identity Services sign-in popups to communicate back while isolating third-party openers.
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
