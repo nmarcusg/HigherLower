@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import { Space_Mono } from "next/font/google";
 import "./globals.css";
-import AtmosphereBackdrop from "@/components/atmosphere/AtmosphereBackdrop";
-import AudioSurface from "@/components/audio/AudioSurface";
+import PublicChrome from "@/components/layout/PublicChrome";
 import { getSiteUrl, SITE_DESCRIPTION, SITE_NAME } from "@/lib/seo/site";
 
 const spaceMono = Space_Mono({
@@ -64,9 +63,7 @@ export default function RootLayout({
         <noscript>
           <style>{`[data-atmo-safe="hero"] * { opacity: 1 !important; transform: none !important; }`}</style>
         </noscript>
-        <AtmosphereBackdrop />
-        {children}
-        <AudioSurface />
+        <PublicChrome>{children}</PublicChrome>
       </body>
     </html>
   );

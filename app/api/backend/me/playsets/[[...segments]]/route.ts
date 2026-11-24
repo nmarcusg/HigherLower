@@ -21,6 +21,8 @@ async function proxy(request: Request, context: { params: Promise<{ segments?: s
   const suffix = [id, action].filter(Boolean).map(encodeURIComponent).join("/");
   const target = `${API_BASE_URL}/me/playsets${suffix ? `/${suffix}` : ""}${new URL(request.url).search}`;
   const headers = new Headers({ Accept: "application/json", Authorization: authorization });
+  const deviceId = request.headers.get("x-device-id");
+  if (deviceId) headers.set("X-Device-Id", deviceId);
   let body: string | undefined;
   if (request.method !== "GET") {
     headers.set("Content-Type", "application/json");

@@ -20,6 +20,7 @@ import DomainSelector, {
 import ModeButton, { type SelectableMode } from "@/components/ModeButton";
 import HighScoresModal from "@/components/HighScoresModal";
 import LaunchDock from "@/components/home/LaunchDock";
+import AdSlot from "@/components/ads/AdSlot";
 import AudioSurface from "@/components/audio/AudioSurface";
 import { emitAtmosphere } from "@/lib/atmosphere/eventBus";
 import {
@@ -458,11 +459,23 @@ export default function HomeSetup({ catalog }: HomeSetupProps) {
             </p>
           )}
         </section>
+
+        <AdSlot slot="home_banner" className="mb-10" />
       </div>
 
       <footer className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border-subtle)] py-4 text-[0.65rem] text-[var(--foreground-muted)]">
         <span>© {new Date().getFullYear()} Higher or Lower</span>
-        <span>More categories coming soon</span>
+        <nav aria-label="Legal links" className="flex flex-wrap items-center gap-4">
+          <Link href="/playsets" className="hover:text-white">
+            Playsets
+          </Link>
+          <Link href="/privacy" className="hover:text-white">
+            Privacy
+          </Link>
+          <Link href="/terms" className="hover:text-white">
+            Terms
+          </Link>
+        </nav>
       </footer>
 
       <LaunchDock

@@ -116,8 +116,22 @@ export interface PublicPlaysetItem {
   sourceYear: number | null;
 }
 
+export type ReportReason =
+  | "OFFENSIVE"
+  | "SEXUAL"
+  | "SPAM"
+  | "MISLEADING"
+  | "COPYRIGHT"
+  | "OTHER";
+
 export interface PublicPlaysetDetail extends PublicPlaysetSummary {
   visibility?: "PUBLIC" | "UNLISTED";
+  moderationState?: "UNREVIEWED" | "APPROVED" | "HIDDEN";
+  creator?: {
+    handle: string;
+    displayName: string;
+    tier: "FREE" | "PRO";
+  } | null;
   items: PublicPlaysetItem[];
 }
 

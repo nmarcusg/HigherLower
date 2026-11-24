@@ -3,8 +3,9 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Layers3, Play, Timer, Users } from "lucide-react";
+import { ArrowLeft, Layers3, Play, Sparkles, Timer, Users } from "lucide-react";
 import BackendSoloGame from "@/components/game/BackendSoloGame";
+import ReportPlaysetDialog from "@/components/playsets/ReportPlaysetDialog";
 import { fetchPublicPlayset } from "@/lib/backend/client";
 import { getSiteUrl, serializeJsonLd, truncateMetaDescription } from "@/lib/seo/site";
 
@@ -31,7 +32,8 @@ export async function generateMetadata({
   }
 
   const canonical = `/playsets/${encodeURIComponent(playset.id)}`;
-  const isUnlisted = playset.visibility === "UNLISTED";
+  const isUnlistedOrHidden =
+    playset.visibility === "UNLISTED" || playset.moderationState === "HIDDEN";
   const isPlayMode = rawMode === "classic" || rawMode === "time-attack";
   const modeSuffix = rawMode === "time-attack" ? "Time Attack" : "Classic";
   const title = isPlayMode
@@ -45,7 +47,7 @@ export async function generateMetadata({
     title,
     description,
     alternates: { canonical },
-    robots: isUnlisted
+    robots: isUnlistedOrHidden
       ? { index: false, follow: false, nocache: true }
       : isPlayMode
         ? { index: false, follow: true }
@@ -93,6 +95,7 @@ export default async function PublicPlaysetGamePage({
 
   const builtIn = playset.id.startsWith("system-");
   const isUnlisted = playset.visibility === "UNLISTED";
+  const isHidden = playset.moderationState === "HIDDEN";
   const previewItems = playset.items.slice(0, 8);
   const siteOrigin = getSiteUrl().origin;
   const canonicalUrl = `${siteOrigin}/playsets/${encodeURIComponent(playset.id)}`;
@@ -127,7 +130,7 @@ export default async function PublicPlaysetGamePage({
 
   return (
     <>
-      {!isUnlisted && (
+      {!isUnlisted && !isHidden && (
         <>
           <script
             type="application/ld+json"
@@ -140,24 +143,39 @@ export default async function PublicPlaysetGamePage({
         </>
       )}
       <main className="relative z-10 mx-auto flex min-h-dvh w-full max-w-5xl flex-col px-5 py-6 sm:px-8 sm:py-10">
-        <header className="flex items-center justify-between gap-4">
+        <header className="flex flex-wrap items-center justify-between gap-4">
           <Link
             href="/playsets"
             className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-[var(--text-secondary)] transition hover:text-white"
           >
             <ArrowLeft size={16} /> Back to playsets
           </Link>
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.04] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent-highlight)]">
-            <Layers3 size={12} aria-hidden="true" />
-            {isUnlisted ? "Unlisted set" : builtIn ? "Official set" : "Community set"}
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            {!builtIn && <ReportPlaysetDialog playsetId={playset.id} playsetTitle={playset.title} />}
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.04] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent-highlight)]">
+              <Layers3 size={12} aria-hidden="true" />
+              {isUnlisted ? "Unlisted set" : builtIn ? "Official set" : "Community set"}
+            </span>
+          </div>
         </header>
 
         <section className="mx-auto w-full max-w-4xl flex-1 py-10 sm:py-14">
           <div className="rounded-md border border-white/20 bg-[#1b1734]/90 p-6 shadow-[0_8px_0_var(--accent-classic)] sm:p-8">
-            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-action-higher)]">
-              {playset.itemCount} items · {playset.metricName} ({playset.metricUnit})
-            </p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-action-higher)]">
+                {playset.itemCount} items · {playset.metricName} ({playset.metricUnit})
+              </p>
+              {playset.creator && (
+                <span className="inline-flex items-center gap-1.5 rounded-sm border border-white/15 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+                  @{playset.creator.handle}
+                  {playset.creator.tier === "PRO" && (
+                    <span className="inline-flex items-center gap-1 text-[var(--accent-highlight)]">
+                      <Sparkles size={11} aria-hidden="true" /> Pro
+                    </span>
+                  )}
+                </span>
+              )}
+            </div>
             <h1 className="mt-3 text-3xl font-bold tracking-[-0.04em] text-white sm:text-5xl">
               {playset.title}
             </h1>
@@ -261,6 +279,13 @@ export default async function PublicPlaysetGamePage({
             </section>
           )}
         </section>
+        <footer className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4 text-[11px] text-[var(--text-muted)]">
+          <span>Higher or Lower</span>
+          <nav aria-label="Legal links" className="flex gap-4">
+            <Link href="/privacy" className="hover:text-white">Privacy</Link>
+            <Link href="/terms" className="hover:text-white">Terms</Link>
+          </nav>
+        </footer>
       </main>
     </>
   );

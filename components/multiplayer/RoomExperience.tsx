@@ -29,6 +29,7 @@ import {
   buildPlaysetPickerOptions,
   type PlaysetPickerOption,
 } from "@/components/multiplayer/PlaysetPickerModal";
+import ReportPlaysetDialog from "@/components/playsets/ReportPlaysetDialog";
 
 type Ack = { ok?: boolean; error?: { code?: string; message?: string }; submitted?: boolean };
 const CARD = "rounded-md border border-white/20 bg-[#1b1734]/90 p-5 shadow-[0_8px_0_var(--accent-classic)] sm:p-7";
@@ -774,10 +775,21 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
     <main className="relative z-10 mx-auto flex min-h-dvh w-full max-w-6xl flex-col px-5 py-6 sm:px-8 sm:py-10">
       <header className="flex flex-wrap items-center justify-between gap-4">
         {!finished && <Link href="/multiplayer" onClick={(event) => { event.preventDefault(); requestExitRoom(); }} className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-[var(--text-secondary)] transition hover:text-white"><ArrowLeft size={16} /> Leave room</Link>}
-        <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">
-          {connected ? <Wifi size={12} className="text-[var(--accent-highlight)]" /> : <WifiOff size={12} className="text-amber-300" />}
-          {connected ? "Connected" : "Reconnecting"}
-        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          {typeof snapshot.playsetId === "string" &&
+            snapshot.playsetId.length > 0 &&
+            !snapshot.playsetId.startsWith("system-") && (
+              <ReportPlaysetDialog
+                playsetId={snapshot.playsetId}
+                playsetTitle={resolvedPlaysetTitle}
+                compact
+              />
+            )}
+          <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+            {connected ? <Wifi size={12} className="text-[var(--accent-highlight)]" /> : <WifiOff size={12} className="text-amber-300" />}
+            {connected ? "Connected" : "Reconnecting"}
+          </span>
+        </div>
       </header>
 
       <section className="mx-auto w-full max-w-5xl flex-1 py-9 sm:py-12">

@@ -8,6 +8,7 @@ import {
   type PublicPlaysetPage,
   type PublicPlaysetSummary,
   type PublicPlaysetItem,
+  type ReportReason,
   type CreateSoloSessionResponse,
   type SoloAnswerReceipt,
   type SoloChoice,
@@ -205,7 +206,30 @@ function parsePublicPlaysetDetail(value: unknown): PublicPlaysetDetail {
   const visibility = value.visibility === "PUBLIC" || value.visibility === "UNLISTED"
     ? value.visibility
     : undefined;
-  return { ...value, items: value.items, ...(visibility ? { visibility } : {}) };
+  const moderationState =
+    value.moderationState === "UNREVIEWED" ||
+    value.moderationState === "APPROVED" ||
+    value.moderationState === "HIDDEN"
+      ? value.moderationState
+      : undefined;
+  const creator =
+    isRecord(value.creator) &&
+    isString(value.creator.handle) &&
+    isString(value.creator.displayName) &&
+    (value.creator.tier === "FREE" || value.creator.tier === "PRO")
+      ? {
+          handle: value.creator.handle,
+          displayName: value.creator.displayName,
+          tier: value.creator.tier as "FREE" | "PRO",
+        }
+      : undefined;
+  return {
+    ...value,
+    items: value.items,
+    ...(visibility ? { visibility } : {}),
+    ...(moderationState ? { moderationState } : {}),
+    ...(creator ? { creator } : {}),
+  };
 }
 
 async function request<T>(path: string, init: RequestInit, parse: (body: unknown) => T): Promise<T> {
@@ -277,10 +301,14 @@ function gameTokenHeaders(gameToken: string): HeadersInit {
 }
 
 export function createSoloSession(input: { playsetId: string; mode: SoloMode }): Promise<CreateSoloSessionResponse> {
+  const deviceId = typeof window !== "undefined" ? getDeviceId() : undefined;
   return request(soloPath(), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
+    headers: {
+      "Content-Type": "application/json",
+      ...(deviceId ? { "X-Device-Id": deviceId } : {}),
+    },
+    body: JSON.stringify({ ...input, ...(deviceId ? { deviceId } : {}) }),
     cache: "no-store",
     signal: AbortSignal.timeout(120_000),
   }, parseCreateSoloSession);
@@ -399,5 +427,35 @@ export function joinRoom(input: JoinRoomRequest): Promise<RoomCredentialResponse
       body: JSON.stringify({ code, nickname, deviceId: getDeviceId() }),
     },
     parseRoomCredential,
+  );
+}
+
+export function reportPlayset(
+  playsetId: string,
+  input: { reason: ReportReason; details?: string },
+): Promise<{ id: string; status: string }> {
+  const deviceId = typeof window !== "undefined" ? getDeviceId() : undefined;
+  return request(
+    `/api/backend/playsets/${encodeURIComponent(playsetId)}/reports`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(deviceId ? { "X-Device-Id": deviceId } : {}),
+      },
+      body: JSON.stringify({
+        reason: input.reason,
+        ...(input.details?.trim() ? { details: input.details.trim() } : {}),
+        ...(deviceId ? { deviceId } : {}),
+      }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(15_000),
+    },
+    (body) => {
+      if (!isRecord(body) || !isString(body.id) || !isString(body.status)) {
+        throw new BackendApiError("Invalid report response.", null);
+      }
+      return { id: body.id, status: body.status };
+    },
   );
 }

@@ -26,6 +26,7 @@ import {
   PlaysetPickerField,
   buildPlaysetPickerOptions,
 } from "@/components/multiplayer/PlaysetPickerModal";
+import AdSlot from "@/components/ads/AdSlot";
 
 const ROOM_MODES: ReadonlyArray<{ id: RoomMode; label: string; description: string }> = [
   { id: "PVP_SPEED", label: "Speed", description: "Shared rounds. Fastest correct answer wins." },
@@ -372,8 +373,13 @@ export default function MultiplayerLobby() {
 
         <div aria-live="polite" className="mx-auto mt-6 min-h-6 text-center text-xs font-bold text-[var(--accent-highlight)]">{status}</div>
         <p className="mt-2 text-center text-[10px] uppercase tracking-[0.14em] text-[var(--text-muted)]">Rooms, live matches, reconnects and spectator scoreboards are available</p>
+        <AdSlot slot="lobby_sidebar" className="mt-6" />
       </section>
-      <footer className="pb-2 text-center text-[10px] uppercase tracking-[0.12em] text-white/35">Higher or Lower · Party mode</footer>
+      <footer className="flex flex-wrap items-center justify-center gap-4 pb-2 text-[10px] uppercase tracking-[0.12em] text-white/35">
+        <span>Higher or Lower · Party mode</span>
+        <Link href="/privacy" className="hover:text-white">Privacy</Link>
+        <Link href="/terms" className="hover:text-white">Terms</Link>
+      </footer>
     </main>
   );
 }

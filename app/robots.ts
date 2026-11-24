@@ -6,7 +6,7 @@ export default function robots(): MetadataRoute.Robots {
   return {
     rules: {
       userAgent: "*",
-      allow: ["/", "/playsets", "/multiplayer"],
+      allow: ["/", "/playsets", "/multiplayer", "/privacy", "/terms"],
       disallow: ["/api/", "/admin/", "/studio", "/multiplayer/room/"],
     },
     sitemap: `${siteOrigin}/sitemap.xml`,

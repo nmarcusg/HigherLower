@@ -1,7 +1,9 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { getDeviceId } from "@/lib/device";
 
 export type PlaysetStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
 export type PlaysetVisibility = "PUBLIC" | "UNLISTED" | "PRIVATE";
+export type ModerationState = "UNREVIEWED" | "APPROVED" | "HIDDEN" | "REMOVED";
 
 export interface CreatorItem {
   id: string;
@@ -9,6 +11,7 @@ export interface CreatorItem {
   value: number;
   displayValue: string;
   imageUrl: string | null;
+  mediaId?: string | null;
   sourceLabel: string;
   sourceYear: number | null;
   sortOrder: number;
@@ -22,6 +25,9 @@ export interface CreatorPlayset {
   metricUnit: string;
   visibility: PlaysetVisibility;
   status: PlaysetStatus;
+  moderationState?: ModerationState;
+  moderationReason?: string | null;
+  publishedAt?: string | null;
   revision: number;
   itemCount: number;
   updatedAt: string;
@@ -36,6 +42,7 @@ export interface CreatorItemInput {
   value: number;
   displayValue?: string;
   imageUrl?: string | null;
+  mediaId?: string | null;
   sourceLabel: string;
   sourceYear?: number | null;
 }
@@ -48,6 +55,49 @@ export interface CreatorPlaysetInput {
   visibility: PlaysetVisibility;
   items: CreatorItemInput[];
   expectedRevision?: number;
+}
+
+export interface CreatorPlaysetAnalytics {
+  playsetId: string;
+  title: string;
+  plays30d: number;
+  finished30d: number;
+  completionRate: number;
+  avgScore: number;
+}
+
+export interface CreatorProfile {
+  userId: string;
+  handle: string;
+  displayName: string;
+  email: string | null;
+  authProvider: string;
+  tier: "FREE" | "PRO";
+  maxPlaysets: number;
+  maxItemsPerSet: number;
+  activeSlotsUsed: number;
+  devicePoolSlotsUsed: number;
+  kofiClaimCode: string;
+  proUnlockedAt: string | null;
+  isStaff: boolean;
+  staffRole: "MODERATOR" | "ADMIN" | null;
+  restrictions: Array<{
+    id: string;
+    type: "PUBLISH_BAN" | "SUSPENDED";
+    reason: string;
+    expiresAt: string | null;
+    createdAt: string;
+  }>;
+  analytics: CreatorPlaysetAnalytics[];
+}
+
+export interface UploadedMediaResponse {
+  id: string;
+  publicUrl: string;
+  sha256: string;
+  byteSize: number;
+  width: number;
+  height: number;
 }
 
 let supabase: SupabaseClient | null = null;
@@ -64,12 +114,23 @@ export function getSupabaseBrowserClient(): SupabaseClient | null {
   return supabase;
 }
 
-async function creatorRequest<T>(token: string, path = "", method: "GET" | "POST" | "PUT" = "GET", body?: unknown): Promise<T> {
-  const response = await fetch(`/api/backend/me/playsets${path}`, {
+function deviceHeaders(): Record<string, string> {
+  const deviceId = getDeviceId();
+  return deviceId ? { "X-Device-Id": deviceId } : {};
+}
+
+async function creatorApiRequest<T>(
+  url: string,
+  token: string,
+  method: "GET" | "POST" | "PUT" | "PATCH" = "GET",
+  body?: unknown,
+): Promise<T> {
+  const response = await fetch(url, {
     method,
     headers: {
       Accept: "application/json",
       Authorization: `Bearer ${token}`,
+      ...deviceHeaders(),
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -78,10 +139,64 @@ async function creatorRequest<T>(token: string, path = "", method: "GET" | "POST
   });
   const payload: unknown = await response.json().catch(() => null);
   if (!response.ok) {
-    const object = typeof payload === "object" && payload !== null ? payload as Record<string, unknown> : {};
+    const object = typeof payload === "object" && payload !== null ? (payload as Record<string, unknown>) : {};
     throw new Error(typeof object.message === "string" ? object.message : `Creator request failed (${response.status}).`);
   }
   return payload as T;
+}
+
+function creatorRequest<T>(token: string, path = "", method: "GET" | "POST" | "PUT" = "GET", body?: unknown): Promise<T> {
+  return creatorApiRequest<T>(`/api/backend/me/playsets${path}`, token, method, body);
+}
+
+export function fetchCreatorProfile(token: string): Promise<CreatorProfile> {
+  return creatorApiRequest<CreatorProfile>("/api/backend/me/profile", token, "GET");
+}
+
+export function updateCreatorProfile(
+  token: string,
+  input: { displayName?: string; handle?: string },
+): Promise<{ userId: string; handle: string; displayName: string; tier: "FREE" | "PRO" }> {
+  return creatorApiRequest("/api/backend/me/profile", token, "PATCH", input);
+}
+
+export async function uploadCreatorImage(
+  token: string,
+  file: File,
+): Promise<UploadedMediaResponse> {
+  if (file.size > 2 * 1024 * 1024) {
+    throw new Error("Image file must be 2 MB or smaller.");
+  }
+  const response = await fetch("/api/backend/me/media/images", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`,
+      "Content-Type": file.type || "application/octet-stream",
+      ...deviceHeaders(),
+    },
+    body: file,
+    cache: "no-store",
+    signal: AbortSignal.timeout(25_000),
+  });
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const object = typeof payload === "object" && payload !== null ? (payload as Record<string, unknown>) : {};
+    throw new Error(typeof object.message === "string" ? object.message : `Image upload failed (${response.status}).`);
+  }
+  return payload as UploadedMediaResponse;
+}
+
+export function startXenditUpgrade(
+  token: string,
+): Promise<{ invoiceUrl: string; providerRef: string; amountPhp: number }> {
+  return creatorApiRequest("/api/backend/me/upgrade/xendit", token, "POST", {});
+}
+
+export function fetchKofiIntent(
+  token: string,
+): Promise<{ kofiUrl: string; claimCode: string; amountUsd: number }> {
+  return creatorApiRequest("/api/backend/me/upgrade/kofi-intent", token, "POST", {});
 }
 
 export function listCreatorPlaysets(token: string): Promise<{ total: number; limit: number; offset: number; playsets: CreatorPlaysetSummary[] }> {

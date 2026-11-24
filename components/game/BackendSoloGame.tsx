@@ -10,6 +10,7 @@ import ComparisonBoard from "@/components/game/ComparisonBoard";
 import GameplayDivider from "@/components/game/GameplayDivider";
 import DecisionControls from "@/components/game/DecisionControls";
 import GameplayStatus from "@/components/game/GameplayStatus";
+import AdSlot from "@/components/ads/AdSlot";
 import type { GameItem } from "@/types/api";
 import type { SemanticCategoryId } from "@/types/game";
 import {
@@ -476,6 +477,7 @@ export default function BackendSoloGame({ playsetId, categoryId, categoryLabel, 
               <button onClick={() => { sessionStorage.removeItem(storageKey); setResults(null); setState(null); setCredential(null); restoreStarted.current = false; setPhase("loading"); void createFreshSession(); }} className="min-h-12 border-2 border-white bg-[var(--accent-highlight)] px-5 py-3 font-bold uppercase text-[#15122b] shadow-[5px_5px_0_#ffffff] transition-transform hover:-translate-y-1">Play again</button>
               <Link href="/" className="flex min-h-12 items-center justify-center gap-2 border-2 border-white px-5 py-3 text-sm font-bold uppercase text-white transition-colors hover:bg-white/10"><ArrowLeft size={14} />Back to setup</Link>
             </div>
+            <AdSlot slot="postgame_card" className="mt-5" />
           </div>
         </div>
       )}
