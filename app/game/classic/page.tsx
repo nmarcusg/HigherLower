@@ -1,7 +1,18 @@
+import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { authorizeBackendGameRoute } from "@/lib/catalog/routeAuthorization";
 import SoloGameplayLoader from "@/lib/backend/SoloGameplayLoader";
 import DerivedGameState from "@/components/game/DerivedGameState";
+import { buildSoloGameMetadata } from "@/lib/seo/site";
+
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}): Promise<Metadata> {
+  const { category } = await searchParams;
+  return buildSoloGameMetadata("classic", category);
+}
 
 // ─── Inner async component (reads and authorizes searchParams) ────────────────
 

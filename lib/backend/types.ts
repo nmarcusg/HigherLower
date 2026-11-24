@@ -105,6 +105,7 @@ export interface PublicPlaysetSummary {
   metricUnit: string;
   itemCount: number;
   revision: number;
+  updatedAt?: string;
 }
 
 export interface PublicPlaysetItem {
@@ -116,6 +117,7 @@ export interface PublicPlaysetItem {
 }
 
 export interface PublicPlaysetDetail extends PublicPlaysetSummary {
+  visibility?: "PUBLIC" | "UNLISTED";
   items: PublicPlaysetItem[];
 }
 

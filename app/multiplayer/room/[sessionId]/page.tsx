@@ -2,8 +2,12 @@ import type { Metadata } from "next";
 import RoomExperience from "@/components/multiplayer/RoomExperience";
 
 export const metadata: Metadata = {
-  title: "Live Room — Higher or Lower",
+  title: "Live Room",
   description: "Play or spectate a Higher or Lower multiplayer room.",
+  robots: {
+    index: false,
+    follow: false,
+  },
 };
 
 export default async function MultiplayerRoomPage({ params, searchParams }: { params: Promise<{ sessionId: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {

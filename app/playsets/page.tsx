@@ -1,15 +1,48 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft, Layers3 } from "lucide-react";
 import { fetchPublicPlaysets } from "@/lib/backend/client";
 import type { PublicPlaysetSummary } from "@/lib/backend";
 import PlaysetsLibrary from "@/components/playsets/PlaysetsLibrary";
 
-export default async function PublicPlaysetsPage() {
+export const metadata: Metadata = {
+  title: "Playset Library",
+  description:
+    "Browse official weekly-updated categories and community custom playsets for Higher or Lower — filter, search, and launch Solo Classic, Time Attack, or Multiplayer.",
+  alternates: {
+    canonical: "/playsets",
+  },
+  openGraph: {
+    title: "Playset Library — Higher or Lower",
+    description:
+      "Search official weekly categories and community-published playsets for solo or 35-player party games.",
+    url: "/playsets",
+    type: "website",
+  },
+};
+
+export default async function PublicPlaysetsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string | string[]; kind?: string | string[] }>;
+}) {
+  const sp = await searchParams;
+  const rawQ = Array.isArray(sp.q) ? sp.q[0] : sp.q;
+  const rawKind = Array.isArray(sp.kind) ? sp.kind[0] : sp.kind;
+  const initialQuery = typeof rawQ === "string" ? rawQ.trim().slice(0, 100) : "";
+  const initialKind: "all" | "system" | "custom" =
+    rawKind === "system" || rawKind === "custom" ? rawKind : "all";
+
   let playsets: PublicPlaysetSummary[] = [];
   let total = 0;
   let unavailable = false;
   try {
-    const page = await fetchPublicPlaysets({ limit: 24, offset: 0 });
+    const page = await fetchPublicPlaysets({
+      limit: 24,
+      offset: 0,
+      ...(initialQuery ? { q: initialQuery } : {}),
+      ...(initialKind !== "all" ? { kind: initialKind } : {}),
+    });
     playsets = page.playsets;
     total = page.total;
   } catch {
@@ -39,6 +72,8 @@ export default async function PublicPlaysetsPage() {
           initialPlaysets={playsets}
           initialTotal={total}
           initialUnavailable={unavailable}
+          initialQuery={initialQuery}
+          initialKind={initialKind}
         />
       </section>
     </main>

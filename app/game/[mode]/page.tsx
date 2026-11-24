@@ -1,8 +1,15 @@
+import type { Metadata } from "next";
 import { ViewTransition } from "react";
 import { notFound, redirect } from "next/navigation";
 import { authorizeBackendGameRoute } from "@/lib/catalog/routeAuthorization";
 import DerivedGameState from "@/components/game/DerivedGameState";
 import SoloGameplayLoader from "@/lib/backend/SoloGameplayLoader";
+import { buildSoloGameMetadata } from "@/lib/seo/site";
+
+export async function generateMetadata(props: PageProps<"/game/[mode]">): Promise<Metadata> {
+  const [{ mode }, sp] = await Promise.all([props.params, props.searchParams]);
+  return buildSoloGameMetadata(mode, sp.category);
+}
 
 /**
  * /game/[mode] — route dispatcher

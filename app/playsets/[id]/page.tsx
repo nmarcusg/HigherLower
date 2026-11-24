@@ -1,9 +1,68 @@
+import { cache } from "react";
+import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Layers3, Play, Timer, Users } from "lucide-react";
 import BackendSoloGame from "@/components/game/BackendSoloGame";
 import { fetchPublicPlayset } from "@/lib/backend/client";
+import { getSiteUrl, serializeJsonLd, truncateMetaDescription } from "@/lib/seo/site";
+
+const loadPublicPlayset = cache((id: string) => fetchPublicPlayset(id));
+
+export async function generateMetadata({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ mode?: string | string[] }>;
+}): Promise<Metadata> {
+  const [{ id }, sp] = await Promise.all([params, searchParams]);
+  const rawMode = Array.isArray(sp.mode) ? sp.mode[0] : sp.mode;
+
+  let playset: Awaited<ReturnType<typeof loadPublicPlayset>>;
+  try {
+    playset = await loadPublicPlayset(id);
+  } catch {
+    return {
+      title: "Playset Not Found",
+      robots: { index: false, follow: false },
+    };
+  }
+
+  const canonical = `/playsets/${encodeURIComponent(playset.id)}`;
+  const isUnlisted = playset.visibility === "UNLISTED";
+  const isPlayMode = rawMode === "classic" || rawMode === "time-attack";
+  const modeSuffix = rawMode === "time-attack" ? "Time Attack" : "Classic";
+  const title = isPlayMode
+    ? `${playset.title} · ${modeSuffix}`
+    : `${playset.title} (${playset.metricName})`;
+  const description = truncateMetaDescription(
+    `Play Higher or Lower with ${playset.title}: compare ${playset.itemCount} items by ${playset.metricName} (${playset.metricUnit}) in Classic, Time Attack, or Multiplayer. ${playset.description}`,
+  );
+
+  return {
+    title,
+    description,
+    alternates: { canonical },
+    robots: isUnlisted
+      ? { index: false, follow: false, nocache: true }
+      : isPlayMode
+        ? { index: false, follow: true }
+        : { index: true, follow: true },
+    openGraph: {
+      title,
+      description,
+      url: canonical,
+      type: "website",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+    },
+  };
+}
 
 export default async function PublicPlaysetGamePage({
   params,
@@ -15,9 +74,9 @@ export default async function PublicPlaysetGamePage({
   const [{ id }, sp] = await Promise.all([params, searchParams]);
   const rawMode = Array.isArray(sp.mode) ? sp.mode[0] : sp.mode;
 
-  let playset: Awaited<ReturnType<typeof fetchPublicPlayset>>;
+  let playset: Awaited<ReturnType<typeof loadPublicPlayset>>;
   try {
-    playset = await fetchPublicPlayset(id);
+    playset = await loadPublicPlayset(id);
   } catch {
     notFound();
   }
@@ -33,131 +92,176 @@ export default async function PublicPlaysetGamePage({
   }
 
   const builtIn = playset.id.startsWith("system-");
+  const isUnlisted = playset.visibility === "UNLISTED";
   const previewItems = playset.items.slice(0, 8);
+  const siteOrigin = getSiteUrl().origin;
+  const canonicalUrl = `${siteOrigin}/playsets/${encodeURIComponent(playset.id)}`;
+
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Home", item: siteOrigin },
+      { "@type": "ListItem", position: 2, name: "Playsets", item: `${siteOrigin}/playsets` },
+      { "@type": "ListItem", position: 3, name: playset.title, item: canonicalUrl },
+    ],
+  };
+
+  const playsetGameJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "VideoGame",
+    name: `${playset.title} — Higher or Lower`,
+    url: canonicalUrl,
+    description: playset.description,
+    applicationCategory: "Game",
+    operatingSystem: "Any (Web Browser)",
+    playMode: ["SinglePlayer", "MultiPlayer"],
+    isAccessibleForFree: true,
+    numberOfItems: playset.itemCount,
+    offers: {
+      "@type": "Offer",
+      price: "0",
+      priceCurrency: "USD",
+    },
+  };
 
   return (
-    <main className="relative z-10 mx-auto flex min-h-dvh w-full max-w-5xl flex-col px-5 py-6 sm:px-8 sm:py-10">
-      <header className="flex items-center justify-between gap-4">
-        <Link
-          href="/playsets"
-          className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-[var(--text-secondary)] transition hover:text-white"
-        >
-          <ArrowLeft size={16} /> Back to playsets
-        </Link>
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.04] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent-highlight)]">
-          <Layers3 size={12} aria-hidden="true" />
-          {builtIn ? "Official set" : "Community set"}
-        </span>
-      </header>
+    <>
+      {!isUnlisted && (
+        <>
+          <script
+            type="application/ld+json"
+            dangerouslySetInnerHTML={{ __html: serializeJsonLd(breadcrumbJsonLd) }}
+          />
+          <script
+            type="application/ld+json"
+            dangerouslySetInnerHTML={{ __html: serializeJsonLd(playsetGameJsonLd) }}
+          />
+        </>
+      )}
+      <main className="relative z-10 mx-auto flex min-h-dvh w-full max-w-5xl flex-col px-5 py-6 sm:px-8 sm:py-10">
+        <header className="flex items-center justify-between gap-4">
+          <Link
+            href="/playsets"
+            className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-[var(--text-secondary)] transition hover:text-white"
+          >
+            <ArrowLeft size={16} /> Back to playsets
+          </Link>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.04] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent-highlight)]">
+            <Layers3 size={12} aria-hidden="true" />
+            {isUnlisted ? "Unlisted set" : builtIn ? "Official set" : "Community set"}
+          </span>
+        </header>
 
-      <section className="mx-auto w-full max-w-4xl flex-1 py-10 sm:py-14">
-        <div className="rounded-md border border-white/20 bg-[#1b1734]/90 p-6 shadow-[0_8px_0_var(--accent-classic)] sm:p-8">
-          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-action-higher)]">
-            {playset.itemCount} items · {playset.metricName} ({playset.metricUnit})
-          </p>
-          <h1 className="mt-3 text-3xl font-bold tracking-[-0.04em] text-white sm:text-5xl">
-            {playset.title}
-          </h1>
-          <p className="mt-4 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
-            {playset.description}
-          </p>
+        <section className="mx-auto w-full max-w-4xl flex-1 py-10 sm:py-14">
+          <div className="rounded-md border border-white/20 bg-[#1b1734]/90 p-6 shadow-[0_8px_0_var(--accent-classic)] sm:p-8">
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-action-higher)]">
+              {playset.itemCount} items · {playset.metricName} ({playset.metricUnit})
+            </p>
+            <h1 className="mt-3 text-3xl font-bold tracking-[-0.04em] text-white sm:text-5xl">
+              {playset.title}
+            </h1>
+            <p className="mt-4 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
+              {playset.description}
+            </p>
 
-          <div className="mt-8 grid gap-4 sm:grid-cols-3">
-            <Link
-              href={`/playsets/${encodeURIComponent(playset.id)}?mode=classic`}
-              className="group flex flex-col justify-between rounded-sm border border-white/25 bg-white/[0.04] p-4 transition hover:-translate-y-0.5 hover:border-[var(--accent-action-higher)] hover:bg-[var(--accent-action-higher)]/10"
-            >
-              <div>
-                <Play size={20} className="text-[var(--accent-action-higher)]" aria-hidden="true" />
-                <h2 className="mt-3 text-base font-bold text-white">Play Classic</h2>
-                <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
-                  Untimed survival run on this playset.
-                </p>
-              </div>
-              <span className="mt-4 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent-action-higher)] group-hover:underline">
-                Start Classic →
-              </span>
-            </Link>
-
-            <Link
-              href={`/playsets/${encodeURIComponent(playset.id)}?mode=time-attack`}
-              className="group flex flex-col justify-between rounded-sm border border-white/25 bg-white/[0.04] p-4 transition hover:-translate-y-0.5 hover:border-[var(--accent-time-attack)] hover:bg-[var(--accent-time-attack)]/10"
-            >
-              <div>
-                <Timer size={20} className="text-[var(--accent-time-attack)]" aria-hidden="true" />
-                <h2 className="mt-3 text-base font-bold text-white">Play Time Attack</h2>
-                <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
-                  Beat the clock with time bonuses and penalties.
-                </p>
-              </div>
-              <span className="mt-4 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent-time-attack)] group-hover:underline">
-                Start Time Attack →
-              </span>
-            </Link>
-
-            <Link
-              href={`/multiplayer?playset=${encodeURIComponent(playset.id)}`}
-              className="group flex flex-col justify-between rounded-sm border border-[var(--accent-highlight)]/45 bg-[var(--accent-highlight)]/10 p-4 transition hover:-translate-y-0.5 hover:border-[var(--accent-highlight)]"
-            >
-              <div>
-                <Users size={20} className="text-[var(--accent-highlight)]" aria-hidden="true" />
-                <h2 className="mt-3 text-base font-bold text-white">Host Multiplayer Room</h2>
-                <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
-                  Create a party room preloaded with this playset.
-                </p>
-              </div>
-              <span className="mt-4 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent-highlight)] group-hover:underline">
-                Open Multiplayer →
-              </span>
-            </Link>
-          </div>
-        </div>
-
-        {previewItems.length > 0 && (
-          <section aria-labelledby="preview-items-heading" className="mt-10">
-            <div className="mb-4 flex items-end justify-between gap-4">
-              <h2 id="preview-items-heading" className="text-lg font-bold text-white">
-                Sample items in this set
-              </h2>
-              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
-                Showing {previewItems.length} of {playset.itemCount}
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {previewItems.map((item) => (
-                <div
-                  key={item.id}
-                  className="overflow-hidden rounded-sm border border-white/15 bg-[#1b1734]/80"
-                >
-                  {item.imageUrl ? (
-                    <div className="relative h-28 w-full">
-                      <Image
-                        src={item.imageUrl}
-                        alt=""
-                        fill
-                        unoptimized
-                        sizes="(max-width: 640px) 50vw, 220px"
-                        className="object-cover opacity-85"
-                      />
-                    </div>
-                  ) : (
-                    <div className="grid h-28 place-items-center bg-white/[0.03] text-[10px] font-bold uppercase tracking-[0.14em] text-white/35">
-                      No image
-                    </div>
-                  )}
-                  <div className="p-3">
-                    <p className="truncate text-xs font-bold text-white">{item.name}</p>
-                    <p className="mt-1 truncate text-[10px] text-[var(--text-muted)]">
-                      {item.sourceLabel}
-                      {item.sourceYear ? ` · ${item.sourceYear}` : ""}
-                    </p>
-                  </div>
+            <div className="mt-8 grid gap-4 sm:grid-cols-3">
+              <Link
+                href={`/playsets/${encodeURIComponent(playset.id)}?mode=classic`}
+                className="group flex flex-col justify-between rounded-sm border border-white/25 bg-white/[0.04] p-4 transition hover:-translate-y-0.5 hover:border-[var(--accent-action-higher)] hover:bg-[var(--accent-action-higher)]/10"
+              >
+                <div>
+                  <Play size={20} className="text-[var(--accent-action-higher)]" aria-hidden="true" />
+                  <h2 className="mt-3 text-base font-bold text-white">Play Classic</h2>
+                  <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
+                    Untimed survival run on this playset.
+                  </p>
                 </div>
-              ))}
+                <span className="mt-4 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent-action-higher)] group-hover:underline">
+                  Start Classic →
+                </span>
+              </Link>
+
+              <Link
+                href={`/playsets/${encodeURIComponent(playset.id)}?mode=time-attack`}
+                className="group flex flex-col justify-between rounded-sm border border-white/25 bg-white/[0.04] p-4 transition hover:-translate-y-0.5 hover:border-[var(--accent-time-attack)] hover:bg-[var(--accent-time-attack)]/10"
+              >
+                <div>
+                  <Timer size={20} className="text-[var(--accent-time-attack)]" aria-hidden="true" />
+                  <h2 className="mt-3 text-base font-bold text-white">Play Time Attack</h2>
+                  <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
+                    Beat the clock with time bonuses and penalties.
+                  </p>
+                </div>
+                <span className="mt-4 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent-time-attack)] group-hover:underline">
+                  Start Time Attack →
+                </span>
+              </Link>
+
+              <Link
+                href={`/multiplayer?playset=${encodeURIComponent(playset.id)}`}
+                className="group flex flex-col justify-between rounded-sm border border-[var(--accent-highlight)]/45 bg-[var(--accent-highlight)]/10 p-4 transition hover:-translate-y-0.5 hover:border-[var(--accent-highlight)]"
+              >
+                <div>
+                  <Users size={20} className="text-[var(--accent-highlight)]" aria-hidden="true" />
+                  <h2 className="mt-3 text-base font-bold text-white">Host Multiplayer Room</h2>
+                  <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
+                    Create a party room preloaded with this playset.
+                  </p>
+                </div>
+                <span className="mt-4 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent-highlight)] group-hover:underline">
+                  Open Multiplayer →
+                </span>
+              </Link>
             </div>
-          </section>
-        )}
-      </section>
-    </main>
+          </div>
+
+          {previewItems.length > 0 && (
+            <section aria-labelledby="preview-items-heading" className="mt-10">
+              <div className="mb-4 flex items-end justify-between gap-4">
+                <h2 id="preview-items-heading" className="text-lg font-bold text-white">
+                  Sample items in this set
+                </h2>
+                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
+                  Showing {previewItems.length} of {playset.itemCount}
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {previewItems.map((item) => (
+                  <div
+                    key={item.id}
+                    className="overflow-hidden rounded-sm border border-white/15 bg-[#1b1734]/80"
+                  >
+                    {item.imageUrl ? (
+                      <div className="relative h-28 w-full">
+                        <Image
+                          src={item.imageUrl}
+                          alt=""
+                          fill
+                          unoptimized
+                          sizes="(max-width: 640px) 50vw, 220px"
+                          className="object-cover opacity-85"
+                        />
+                      </div>
+                    ) : (
+                      <div className="grid h-28 place-items-center bg-white/[0.03] text-[10px] font-bold uppercase tracking-[0.14em] text-white/35">
+                        No image
+                      </div>
+                    )}
+                    <div className="p-3">
+                      <p className="truncate text-xs font-bold text-white">{item.name}</p>
+                      <p className="mt-1 truncate text-[10px] text-[var(--text-muted)]">
+                        {item.sourceLabel}
+                        {item.sourceYear ? ` · ${item.sourceYear}` : ""}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+        </section>
+      </main>
+    </>
   );
 }

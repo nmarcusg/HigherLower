@@ -1,8 +1,12 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Game — Higher or Lower",
+  title: "Game",
   description: "Play Higher or Lower",
+  robots: {
+    index: false,
+    follow: true,
+  },
 };
 
 /**

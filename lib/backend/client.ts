@@ -173,7 +173,8 @@ function isPublicPlaysetSummary(value: unknown): value is PublicPlaysetSummary {
   return isRecord(value) && isString(value.id) && isString(value.title) &&
     isString(value.description) && isString(value.metricName) &&
     isString(value.metricUnit) && Number.isInteger(value.itemCount) &&
-    Number.isInteger(value.revision);
+    Number.isInteger(value.revision) &&
+    (value.updatedAt === undefined || isString(value.updatedAt));
 }
 
 function isPublicPlaysetItem(value: unknown): value is PublicPlaysetItem {
@@ -201,7 +202,10 @@ function parsePublicPlaysetDetail(value: unknown): PublicPlaysetDetail {
     !value.items.every(isPublicPlaysetItem)) {
     throw new BackendApiError("The API returned an invalid playset response.", null);
   }
-  return { ...value, items: value.items };
+  const visibility = value.visibility === "PUBLIC" || value.visibility === "UNLISTED"
+    ? value.visibility
+    : undefined;
+  return { ...value, items: value.items, ...(visibility ? { visibility } : {}) };
 }
 
 async function request<T>(path: string, init: RequestInit, parse: (body: unknown) => T): Promise<T> {

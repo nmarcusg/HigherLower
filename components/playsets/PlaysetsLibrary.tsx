@@ -62,20 +62,24 @@ interface PlaysetsLibraryProps {
   initialPlaysets: PublicPlaysetSummary[];
   initialTotal: number;
   initialUnavailable: boolean;
+  initialQuery?: string;
+  initialKind?: KindFilter;
 }
 
 export default function PlaysetsLibrary({
   initialPlaysets,
   initialTotal,
   initialUnavailable,
+  initialQuery = "",
+  initialKind = "all",
 }: PlaysetsLibraryProps) {
   const router = useRouter();
   const searchInputId = useId();
   const unlistedInputId = useId();
 
-  const [queryInput, setQueryInput] = useState("");
-  const [appliedQuery, setAppliedQuery] = useState("");
-  const [kind, setKind] = useState<KindFilter>("all");
+  const [queryInput, setQueryInput] = useState(initialQuery);
+  const [appliedQuery, setAppliedQuery] = useState(initialQuery);
+  const [kind, setKind] = useState<KindFilter>(initialKind);
   const [playsets, setPlaysets] = useState<PublicPlaysetSummary[]>(initialPlaysets);
   const [total, setTotal] = useState(initialTotal);
   const [unavailable, setUnavailable] = useState(initialUnavailable);
