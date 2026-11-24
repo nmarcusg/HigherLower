@@ -34,7 +34,7 @@ export default function AdminSystemStaffPage() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    if (identity.role !== "ADMIN") return;
+    if (identity.role !== "SUPERADMIN") return;
     try {
       const [sysRes, staffRes] = await Promise.all([
         fetchAdminSystem(token),
@@ -123,10 +123,10 @@ export default function AdminSystemStaffPage() {
     }
   }
 
-  if (identity.role !== "ADMIN") {
+  if (identity.role !== "SUPERADMIN") {
     return (
       <p className="rounded border border-red-400/30 bg-red-950/30 p-4 text-sm text-red-200">
-        Administrator role is required to view System &amp; Staff controls.
+        Superadmin role is required to view System &amp; Staff controls.
       </p>
     );
   }
@@ -271,6 +271,7 @@ export default function AdminSystemStaffPage() {
               >
                 <option value="MODERATOR">MODERATOR</option>
                 <option value="ADMIN">ADMIN</option>
+                <option value="SUPERADMIN">SUPERADMIN</option>
               </select>
             </label>
             <label className="text-xs text-[var(--text-muted)]">

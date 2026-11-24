@@ -28,7 +28,13 @@ import {
   X,
 } from "lucide-react";
 import { getSupabaseBrowserClient } from "@/lib/backend/creator";
-import { AdminApiError, fetchAdminMe, type AdminIdentity } from "@/lib/backend/admin";
+import {
+  AdminApiError,
+  fetchAdminMe,
+  hasMinRole,
+  type AdminIdentity,
+  type StaffRole,
+} from "@/lib/backend/admin";
 
 interface AdminContextValue {
   token: string;
@@ -45,17 +51,22 @@ export function useAdminAuth(): AdminContextValue {
   return ctx;
 }
 
-const NAV_ITEMS = [
+const NAV_ITEMS: ReadonlyArray<{
+  href: string;
+  label: string;
+  icon: typeof BarChart3;
+  minRole?: StaffRole;
+}> = [
   { href: "/admin", label: "Dashboard", icon: BarChart3 },
   { href: "/admin/moderation", label: "Moderation", icon: Flag },
   { href: "/admin/playsets", label: "Playsets", icon: Layers3 },
   { href: "/admin/creators", label: "Creators", icon: Users },
-  { href: "/admin/payments", label: "Payments & Ads", icon: CreditCard, adminOnly: true },
+  { href: "/admin/payments", label: "Payments & Ads", icon: CreditCard, minRole: "ADMIN" },
   { href: "/admin/live", label: "Live Ops", icon: Activity },
   { href: "/admin/catalog", label: "Catalog", icon: Database },
-  { href: "/admin/system", label: "System & Staff", icon: Settings, adminOnly: true },
+  { href: "/admin/system", label: "System & Staff", icon: Settings, minRole: "SUPERADMIN" },
   { href: "/admin/audit", label: "Audit Log", icon: ScrollText },
-] as const;
+];
 
 export default function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -161,8 +172,8 @@ export default function AdminShell({ children }: { children: ReactNode }) {
           </div>
           <h1 className="mt-3 text-2xl font-bold">Admin Console Sign-In</h1>
           <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">
-            Authorized moderators and administrators only. Sign in with your linked Discord or
-            Google account.
+            Authorized moderators, administrators, and superadmins only. Sign in with your linked
+            Discord or Google account.
           </p>
           <div className="mt-6 space-y-3">
             <button
@@ -265,14 +276,22 @@ export default function AdminShell({ children }: { children: ReactNode }) {
               <p className="mt-1 truncate text-xs text-[var(--text-muted)]">
                 {identity.displayName || identity.email || identity.userId}
               </p>
-              <span className="mt-2 inline-block rounded bg-white/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--accent-action-higher)]">
+              <span
+                className={`mt-2 inline-block rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] ${
+                  identity.role === "SUPERADMIN"
+                    ? "border border-[var(--accent-highlight)]/45 bg-[var(--accent-highlight)]/15 text-[var(--accent-highlight)]"
+                    : identity.role === "ADMIN"
+                      ? "bg-white/10 text-[var(--accent-action-higher)]"
+                      : "bg-white/10 text-[var(--text-secondary)]"
+                }`}
+              >
                 {identity.role}
               </span>
             </div>
 
             <nav aria-label="Admin navigation" className="space-y-1 p-3">
               {NAV_ITEMS.filter(
-                (item) => !("adminOnly" in item && item.adminOnly && identity.role !== "ADMIN"),
+                (item) => !item.minRole || hasMinRole(identity.role, item.minRole),
               ).map((item) => {
                 const Icon = item.icon;
                 const active =
@@ -336,7 +355,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
           >
             <div className="grid grid-cols-2 gap-1.5">
               {NAV_ITEMS.filter(
-                (item) => !("adminOnly" in item && item.adminOnly && identity.role !== "ADMIN"),
+                (item) => !item.minRole || hasMinRole(identity.role, item.minRole),
               ).map((item) => {
                 const Icon = item.icon;
                 const active =

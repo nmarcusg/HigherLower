@@ -8,6 +8,7 @@ import NativeModalDialog from "@/components/ui/NativeModalDialog";
 import {
   fetchAdminLive,
   forceEndAdminRoom,
+  hasMinRole,
   kickAdminParticipant,
   lookupAdminSession,
   updateAdminSettings,
@@ -18,6 +19,8 @@ type LookupData = Awaited<ReturnType<typeof lookupAdminSession>>;
 
 export default function AdminLiveOpsPage() {
   const { token, identity } = useAdminAuth();
+  const isAdmin = hasMinRole(identity.role, "ADMIN");
+  const isSuperAdmin = identity.role === "SUPERADMIN";
   const [live, setLive] = useState<LiveData | null>(null);
   const [banner, setBanner] = useState("");
   const [roomsCreateEnabled, setRoomsCreateEnabled] = useState(true);
@@ -63,19 +66,25 @@ export default function AdminLiveOpsPage() {
     try {
       await updateAdminSettings(
         token,
-        {
-          "maintenance.banner": banner,
-          "rooms.create.enabled": roomsCreateEnabled,
-          "solo.create.enabled": soloCreateEnabled,
-          "creator.publish.enabled": creatorPublishEnabled,
-          "creator.upload.enabled": creatorUploadEnabled,
-        },
-        "Updated Live Ops kill-switches / maintenance banner",
+        isSuperAdmin
+          ? {
+              "maintenance.banner": banner,
+              "rooms.create.enabled": roomsCreateEnabled,
+              "solo.create.enabled": soloCreateEnabled,
+              "creator.publish.enabled": creatorPublishEnabled,
+              "creator.upload.enabled": creatorUploadEnabled,
+            }
+          : {
+              "maintenance.banner": banner,
+            },
+        isSuperAdmin
+          ? "Updated Live Ops kill-switches / maintenance banner"
+          : "Updated maintenance banner",
       );
-      setNotice("Live switches and banner saved.");
+      setNotice(isSuperAdmin ? "Live switches and banner saved." : "Maintenance banner saved.");
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save kill switches.");
+      setError(err instanceof Error ? err.message : "Failed to save controls.");
     } finally {
       setBusy(false);
     }
@@ -238,13 +247,15 @@ export default function AdminLiveOpsPage() {
       )}
 
       <div className="grid gap-6 lg:grid-cols-2">
-        {identity.role === "ADMIN" && (
+        {isAdmin && (
           <form
             onSubmit={(e) => void saveKillSwitches(e)}
             className="space-y-4 rounded-md border border-white/15 bg-[#121628] p-5"
           >
             <h2 className="text-xs font-bold uppercase tracking-[0.14em] text-[var(--text-secondary)]">
-              Maintenance Banner &amp; Feature Kill-Switches
+              {isSuperAdmin
+                ? "Maintenance Banner & Feature Kill-Switches"
+                : "Maintenance Banner"}
             </h2>
             <label className="block text-xs text-[var(--text-muted)]">
               Maintenance Banner Text (empty to hide)
@@ -255,46 +266,56 @@ export default function AdminLiveOpsPage() {
                 className="mt-1.5 w-full rounded-sm border border-white/20 bg-[#0b0d17] px-3 py-2 text-sm text-white"
               />
             </label>
-            <div className="grid gap-2 text-xs text-[var(--text-secondary)] sm:grid-cols-2">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={soloCreateEnabled}
-                  onChange={(e) => setSoloCreateEnabled(e.target.checked)}
-                />
-                Solo sessions enabled
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={roomsCreateEnabled}
-                  onChange={(e) => setRoomsCreateEnabled(e.target.checked)}
-                />
-                Room creation enabled
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={creatorPublishEnabled}
-                  onChange={(e) => setCreatorPublishEnabled(e.target.checked)}
-                />
-                Creator publishing enabled
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={creatorUploadEnabled}
-                  onChange={(e) => setCreatorUploadEnabled(e.target.checked)}
-                />
-                Creator uploads enabled
-              </label>
-            </div>
+            {isSuperAdmin ? (
+              <div className="grid gap-2 text-xs text-[var(--text-secondary)] sm:grid-cols-2">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={soloCreateEnabled}
+                    onChange={(e) => setSoloCreateEnabled(e.target.checked)}
+                  />
+                  Solo sessions enabled
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={roomsCreateEnabled}
+                    onChange={(e) => setRoomsCreateEnabled(e.target.checked)}
+                  />
+                  Room creation enabled
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={creatorPublishEnabled}
+                    onChange={(e) => setCreatorPublishEnabled(e.target.checked)}
+                  />
+                  Creator publishing enabled
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={creatorUploadEnabled}
+                    onChange={(e) => setCreatorUploadEnabled(e.target.checked)}
+                  />
+                  Creator uploads enabled
+                </label>
+              </div>
+            ) : (
+              <div className="rounded border border-white/10 bg-black/25 p-3 text-xs text-[var(--text-muted)]">
+                Global feature kill-switches (Solo: {soloCreateEnabled ? "On" : "Off"} · Rooms:{" "}
+                {roomsCreateEnabled ? "On" : "Off"} · Publish:{" "}
+                {creatorPublishEnabled ? "On" : "Off"} · Uploads:{" "}
+                {creatorUploadEnabled ? "On" : "Off"}) require{" "}
+                <span className="text-[var(--text-secondary)]">SUPERADMIN</span> to toggle.
+              </div>
+            )}
             <button
               type="submit"
               disabled={busy}
               className="inline-flex min-h-9 items-center gap-1.5 rounded-sm bg-[var(--accent-highlight)] px-4 text-xs font-bold uppercase text-[#15122b]"
             >
-              <Save size={13} /> Apply Controls
+              <Save size={13} /> {isSuperAdmin ? "Apply Controls" : "Save Banner"}
             </button>
           </form>
         )}

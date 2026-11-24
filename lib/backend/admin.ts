@@ -1,6 +1,16 @@
 import { getDeviceId } from "@/lib/device";
 
-export type StaffRole = "MODERATOR" | "ADMIN";
+export type StaffRole = "MODERATOR" | "ADMIN" | "SUPERADMIN";
+
+const ROLE_RANK: Record<StaffRole, number> = {
+  MODERATOR: 1,
+  ADMIN: 2,
+  SUPERADMIN: 3,
+};
+
+export function hasMinRole(role: StaffRole, min: StaffRole): boolean {
+  return ROLE_RANK[role] >= ROLE_RANK[min];
+}
 
 export interface AdminIdentity {
   userId: string;

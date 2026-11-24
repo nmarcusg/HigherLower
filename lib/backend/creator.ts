@@ -80,7 +80,7 @@ export interface CreatorProfile {
   kofiClaimCode: string;
   proUnlockedAt: string | null;
   isStaff: boolean;
-  staffRole: "MODERATOR" | "ADMIN" | null;
+  staffRole: "MODERATOR" | "ADMIN" | "SUPERADMIN" | null;
   restrictions: Array<{
     id: string;
     type: "PUBLISH_BAN" | "SUSPENDED";

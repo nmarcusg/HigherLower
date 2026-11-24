@@ -10,6 +10,7 @@ import NativeModalDialog from "@/components/ui/NativeModalDialog";
 import {
   fetchAdminPayments,
   fetchAdminSettings,
+  hasMinRole,
   linkAdminPayment,
   updateAdminSettings,
   type AdminPaymentRow,
@@ -20,6 +21,8 @@ type PayTab = "transactions" | "pricing" | "ads";
 
 export default function AdminPaymentsAdsPage() {
   const { token, identity } = useAdminAuth();
+  const isAdmin = hasMinRole(identity.role, "ADMIN");
+  const isSuperAdmin = identity.role === "SUPERADMIN";
   const [tab, setTab] = useState<PayTab>("transactions");
   const [payments, setPayments] = useState<AdminPaymentRow[]>([]);
   const [settings, setSettings] = useState<AdminPlatformSettings | null>(null);
@@ -46,29 +49,31 @@ export default function AdminPaymentsAdsPage() {
   const [adsTxt, setAdsTxt] = useState("");
 
   const loadAll = useCallback(async () => {
-    if (identity.role !== "ADMIN") return;
+    if (!isAdmin) return;
     try {
       const [payRes, setRes] = await Promise.all([
         fetchAdminPayments(token),
-        fetchAdminSettings(token),
+        isSuperAdmin ? fetchAdminSettings(token) : Promise.resolve(null),
       ]);
       setPayments(payRes.payments);
-      setSettings(setRes);
-      setXenditEnabled(setRes.payments.xenditEnabled);
-      setKofiEnabled(setRes.payments.kofiEnabled);
-      setPricePhp(String(setRes.payments.pricePhp));
-      setPriceUsd(String(setRes.payments.priceUsd));
-      setKofiUrl(setRes.payments.kofiUrl);
-      setAdsEnabled(setRes.ads.enabled);
-      setSlotHome(setRes.ads.slots.home_banner);
-      setSlotLobby(setRes.ads.slots.lobby_sidebar);
-      setSlotPostgame(setRes.ads.slots.postgame_card);
-      setAdsTxt(setRes.ads.adsTxt);
+      if (setRes) {
+        setSettings(setRes);
+        setXenditEnabled(setRes.payments.xenditEnabled);
+        setKofiEnabled(setRes.payments.kofiEnabled);
+        setPricePhp(String(setRes.payments.pricePhp));
+        setPriceUsd(String(setRes.payments.priceUsd));
+        setKofiUrl(setRes.payments.kofiUrl);
+        setAdsEnabled(setRes.ads.enabled);
+        setSlotHome(setRes.ads.slots.home_banner);
+        setSlotLobby(setRes.ads.slots.lobby_sidebar);
+        setSlotPostgame(setRes.ads.slots.postgame_card);
+        setAdsTxt(setRes.ads.adsTxt);
+      }
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load payments & settings.");
     }
-  }, [identity.role, token]);
+  }, [isAdmin, isSuperAdmin, token]);
 
   useEffect(() => {
     void Promise.resolve().then(() => loadAll());
@@ -146,7 +151,7 @@ export default function AdminPaymentsAdsPage() {
     }
   }
 
-  if (identity.role !== "ADMIN") {
+  if (!isAdmin) {
     return (
       <p className="rounded border border-red-400/30 bg-red-950/30 p-4 text-sm text-red-200">
         Administrator role is required to view Payments &amp; Ads controls.
@@ -161,16 +166,25 @@ export default function AdminPaymentsAdsPage() {
         <p className="mt-1 text-xs text-[var(--text-muted)]">
           Manage Xendit &amp; Ko-fi unlocks, link unmatched receipts, and control ad slots + dynamic /ads.txt.
         </p>
+        {!isSuperAdmin && (
+          <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+            Pricing, payment provider switches, and Ads &amp; /ads.txt settings require SUPERADMIN access.
+          </p>
+        )}
       </header>
 
       <AdminTabs
         label="Payments & Ads sections"
         tabs={[
           { id: "transactions", label: "Transactions", badge: payments.length },
-          { id: "pricing", label: "Pricing & Providers" },
-          { id: "ads", label: "Ads & ads.txt" },
+          ...(isSuperAdmin
+            ? [
+                { id: "pricing" as const, label: "Pricing & Providers" },
+                { id: "ads" as const, label: "Ads & ads.txt" },
+              ]
+            : []),
         ]}
-        activeId={tab}
+        activeId={isSuperAdmin ? tab : "transactions"}
         onChange={setTab}
       />
 
@@ -261,7 +275,7 @@ export default function AdminPaymentsAdsPage() {
         />
       )}
 
-      {tab === "pricing" && settings && (
+      {isSuperAdmin && tab === "pricing" && settings && (
         <form onSubmit={(e) => void savePricing(e)} className="max-w-2xl space-y-5 rounded-md border border-white/15 bg-[#121628] p-6">
           <div className="space-y-3">
             <label className="flex items-center gap-3 text-sm">
@@ -328,7 +342,7 @@ export default function AdminPaymentsAdsPage() {
         </form>
       )}
 
-      {tab === "ads" && settings && (
+      {isSuperAdmin && tab === "ads" && settings && (
         <form onSubmit={(e) => void saveAds(e)} className="max-w-2xl space-y-5 rounded-md border border-white/15 bg-[#121628] p-6">
           <div className="rounded border border-amber-300/30 bg-amber-950/20 p-3 text-xs text-amber-100">
             Keep ads paused while hosted on a free vercel.app preview domain. Enable after attaching a

@@ -7,6 +7,7 @@ import { useAdminAuth } from "@/components/admin/AdminShell";
 import AdminTable from "@/components/admin/AdminTable";
 import {
   fetchAdminCreatorDetail,
+  hasMinRole,
   liftAdminRestriction,
   restrictAdminCreator,
   setCreatorCustomCaps,
@@ -198,7 +199,7 @@ export default function AdminCreatorDetailPage({
               </label>
 
               <div className="flex flex-wrap items-center gap-3">
-                {identity.role === "ADMIN" && (
+                {identity.role === "SUPERADMIN" && (
                   <>
                     {detail.profile.tier === "FREE" ? (
                       <button
@@ -263,7 +264,7 @@ export default function AdminCreatorDetailPage({
                 >
                   <ShieldOff size={14} /> Apply Publish Ban
                 </button>
-                {identity.role === "ADMIN" && (
+                {hasMinRole(identity.role, "ADMIN") && (
                   <button
                     type="button"
                     disabled={busy}
@@ -297,14 +298,18 @@ export default function AdminCreatorDetailPage({
                   align: "right",
                   render: (r) =>
                     !r.liftedAt ? (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => void lift(r.id)}
-                        className="rounded border border-white/25 px-2.5 py-1 text-[10px] font-bold uppercase hover:bg-white/10"
-                      >
-                        Lift
-                      </button>
+                      r.type === "SUSPENDED" && !hasMinRole(identity.role, "ADMIN") ? (
+                        <span className="text-xs text-[var(--text-muted)]">Admin+</span>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void lift(r.id)}
+                          className="rounded border border-white/25 px-2.5 py-1 text-[10px] font-bold uppercase hover:bg-white/10"
+                        >
+                          Lift
+                        </button>
+                      )
                     ) : (
                       "—"
                     ),
