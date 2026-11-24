@@ -1,6 +1,5 @@
 import { cache } from "react";
 import type { Metadata } from "next";
-import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Layers3, Play, Sparkles, Timer, Users } from "lucide-react";
@@ -32,8 +31,14 @@ export async function generateMetadata({
   }
 
   const canonical = `/playsets/${encodeURIComponent(playset.id)}`;
+  const isPendingApproval =
+    !playset.id.startsWith("system-") &&
+    playset.visibility === "PUBLIC" &&
+    playset.moderationState === "UNREVIEWED";
   const isUnlistedOrHidden =
-    playset.visibility === "UNLISTED" || playset.moderationState === "HIDDEN";
+    playset.visibility === "UNLISTED" ||
+    playset.moderationState === "HIDDEN" ||
+    isPendingApproval;
   const isPlayMode = rawMode === "classic" || rawMode === "time-attack";
   const modeSuffix = rawMode === "time-attack" ? "Time Attack" : "Classic";
   const title = isPlayMode
@@ -96,6 +101,8 @@ export default async function PublicPlaysetGamePage({
   const builtIn = playset.id.startsWith("system-");
   const isUnlisted = playset.visibility === "UNLISTED";
   const isHidden = playset.moderationState === "HIDDEN";
+  const isPendingApproval =
+    !builtIn && playset.visibility === "PUBLIC" && playset.moderationState === "UNREVIEWED";
   const previewItems = playset.items.slice(0, 8);
   const siteOrigin = getSiteUrl().origin;
   const canonicalUrl = `${siteOrigin}/playsets/${encodeURIComponent(playset.id)}`;
@@ -130,7 +137,7 @@ export default async function PublicPlaysetGamePage({
 
   return (
     <>
-      {!isUnlisted && !isHidden && (
+      {!isUnlisted && !isHidden && !isPendingApproval && (
         <>
           <script
             type="application/ld+json"
@@ -155,7 +162,13 @@ export default async function PublicPlaysetGamePage({
             {!builtIn && <ReportPlaysetDialog playsetId={playset.id} playsetTitle={playset.title} />}
             <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.04] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent-highlight)]">
               <Layers3 size={12} aria-hidden="true" />
-              {isUnlisted ? "Unlisted set" : builtIn ? "Official set" : "Community set"}
+              {isPendingApproval
+                ? "Pending approval · Unlisted"
+                : isUnlisted
+                  ? "Unlisted set"
+                  : builtIn
+                    ? "Official set"
+                    : "Community set"}
             </span>
           </div>
         </header>
@@ -183,6 +196,15 @@ export default async function PublicPlaysetGamePage({
             <p className="mt-4 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
               {playset.description}
             </p>
+            {isPendingApproval && (
+              <div
+                role="status"
+                className="mt-5 rounded-sm border border-amber-400/35 bg-amber-950/35 p-3.5 text-xs leading-5 text-amber-100"
+              >
+                This playset is currently unlisted while waiting for moderator approval. Anyone with
+                this link can play it now; it will appear in Community once approved.
+              </div>
+            )}
 
             <div className="mt-8 grid gap-4 sm:grid-cols-3">
               <Link
@@ -252,14 +274,13 @@ export default async function PublicPlaysetGamePage({
                     className="overflow-hidden rounded-sm border border-white/15 bg-[#1b1734]/80"
                   >
                     {item.imageUrl ? (
-                      <div className="relative h-28 w-full">
-                        <Image
+                      <div className="relative h-28 w-full overflow-hidden bg-black/30">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
                           src={item.imageUrl}
-                          alt=""
-                          fill
-                          unoptimized
-                          sizes="(max-width: 640px) 50vw, 220px"
-                          className="object-cover opacity-85"
+                          alt={item.name}
+                          loading="lazy"
+                          className="h-full w-full object-cover opacity-90"
                         />
                       </div>
                     ) : (

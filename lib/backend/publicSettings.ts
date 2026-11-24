@@ -5,6 +5,7 @@ export interface PublicSettings {
     soloCreateEnabled: boolean;
     creatorPublishEnabled: boolean;
     creatorUploadEnabled: boolean;
+    mediaStorageConfigured?: boolean;
   };
   payments: {
     xenditEnabled: boolean;
@@ -30,6 +31,7 @@ export const DEFAULT_PUBLIC_SETTINGS: PublicSettings = {
     soloCreateEnabled: true,
     creatorPublishEnabled: true,
     creatorUploadEnabled: true,
+    mediaStorageConfigured: true,
   },
   payments: {
     xenditEnabled: false,

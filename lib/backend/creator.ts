@@ -100,6 +100,21 @@ export interface UploadedMediaResponse {
   height: number;
 }
 
+export interface CreatorNotification {
+  id: string;
+  type: string;
+  playsetId: string | null;
+  title: string;
+  message: string;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export interface CreatorNotificationFeed {
+  unreadCount: number;
+  notifications: CreatorNotification[];
+}
+
 let supabase: SupabaseClient | null = null;
 
 export function isSupabaseConfigured(): boolean {
@@ -160,11 +175,58 @@ export function updateCreatorProfile(
   return creatorApiRequest("/api/backend/me/profile", token, "PATCH", input);
 }
 
+const AUTO_RESIZE_TRIGGER_BYTES = Math.floor(1.8 * 1024 * 1024);
+const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
+const MAX_CLIENT_DIMENSION = 1280;
+
+async function prepareUploadFile(file: File): Promise<File> {
+  if (file.size <= AUTO_RESIZE_TRIGGER_BYTES || typeof document === "undefined") {
+    return file;
+  }
+
+  let objectUrl = "";
+  try {
+    objectUrl = URL.createObjectURL(file);
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("Could not decode image."));
+      el.src = objectUrl;
+    });
+
+    const scale = Math.min(1, MAX_CLIENT_DIMENSION / Math.max(img.naturalWidth, img.naturalHeight, 1));
+    const targetWidth = Math.max(1, Math.round(img.naturalWidth * scale));
+    const targetHeight = Math.max(1, Math.round(img.naturalHeight * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+    const encode = (mime: string, quality: number) =>
+      new Promise<Blob | null>((resolve) => canvas.toBlob((b) => resolve(b), mime, quality));
+
+    const blob = (await encode("image/webp", 0.86)) ?? (await encode("image/jpeg", 0.85));
+    if (!blob || blob.size >= file.size) return file;
+
+    const baseName = file.name.replace(/\.[^.]+$/, "") || "image";
+    const ext = blob.type === "image/webp" ? "webp" : "jpg";
+    return new File([blob], `${baseName}.${ext}`, { type: blob.type });
+  } catch {
+    return file;
+  } finally {
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+  }
+}
+
 export async function uploadCreatorImage(
   token: string,
   file: File,
 ): Promise<UploadedMediaResponse> {
-  if (file.size > 2 * 1024 * 1024) {
+  const prepared = await prepareUploadFile(file);
+  if (prepared.size > MAX_UPLOAD_BYTES) {
     throw new Error("Image file must be 2 MB or smaller.");
   }
   const response = await fetch("/api/backend/me/media/images", {
@@ -172,10 +234,10 @@ export async function uploadCreatorImage(
     headers: {
       Accept: "application/json",
       Authorization: `Bearer ${token}`,
-      "Content-Type": file.type || "application/octet-stream",
+      "Content-Type": prepared.type || "application/octet-stream",
       ...deviceHeaders(),
     },
-    body: file,
+    body: prepared,
     cache: "no-store",
     signal: AbortSignal.timeout(25_000),
   });
@@ -185,6 +247,22 @@ export async function uploadCreatorImage(
     throw new Error(typeof object.message === "string" ? object.message : `Image upload failed (${response.status}).`);
   }
   return payload as UploadedMediaResponse;
+}
+
+export function fetchCreatorNotifications(token: string): Promise<CreatorNotificationFeed> {
+  return creatorApiRequest("/api/backend/me/notifications", token);
+}
+
+export function markCreatorNotificationsRead(
+  token: string,
+  ids?: string[],
+): Promise<{ unreadCount: number }> {
+  return creatorApiRequest(
+    "/api/backend/me/notifications/read",
+    token,
+    "POST",
+    ids && ids.length > 0 ? { ids } : {},
+  );
 }
 
 export function startXenditUpgrade(

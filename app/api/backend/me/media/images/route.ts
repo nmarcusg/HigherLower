@@ -40,10 +40,17 @@ export async function POST(request: Request) {
       cache: "no-store",
       signal: AbortSignal.timeout(25_000),
     });
-    return new Response(response.body, {
-      status: response.status,
-      headers: { "Content-Type": response.headers.get("content-type") || "application/json" },
-    });
+    const text = await response.text();
+    return new Response(
+      text ||
+        JSON.stringify({
+          message: response.ok ? "OK" : `Image upload failed (${response.status}).`,
+        }),
+      {
+        status: response.status,
+        headers: { "Content-Type": response.headers.get("content-type") || "application/json" },
+      },
+    );
   } catch {
     return Response.json(
       { message: "Image upload service could not be reached. Please try again." },

@@ -243,6 +243,16 @@ export default function AdminModerationPage() {
         onChange={setTab}
       />
 
+      {tab === "recent" && (
+        <div
+          role="note"
+          className="rounded-sm border border-sky-400/35 bg-sky-950/30 p-3 text-xs text-sky-100"
+        >
+          Newly published public playsets stay <strong>unlisted</strong> (playable by link only)
+          until approved here. Approving publishes the set to Community and notifies the creator.
+        </div>
+      )}
+
       {error && (
         <div role="alert" className="rounded-sm border border-red-400/40 bg-red-950/30 p-3 text-xs text-red-200">
           {error}

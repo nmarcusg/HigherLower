@@ -6,6 +6,7 @@ import {
   Archive,
   ArrowRight,
   ArrowLeft,
+  Bell,
   Check,
   CircleAlert,
   Copy,
@@ -30,15 +31,18 @@ import {
   archiveCreatorPlayset,
   createCreatorPlayset,
   creatorPlaysetAction,
+  fetchCreatorNotifications,
   fetchCreatorProfile,
   fetchKofiIntent,
   getCreatorPlayset,
   getSupabaseBrowserClient,
   listCreatorPlaysets,
+  markCreatorNotificationsRead,
   startXenditUpgrade,
   updateCreatorPlayset,
   updateCreatorProfile,
   uploadCreatorImage,
+  type CreatorNotification,
   type CreatorPlayset,
   type CreatorPlaysetSummary,
   type CreatorProfile,
@@ -185,6 +189,9 @@ export default function CreatorStudio() {
   const [profile, setProfile] = useState<CreatorProfile | null>(null);
   const [publicSettings, setPublicSettings] = useState<PublicSettings>(DEFAULT_PUBLIC_SETTINGS);
   const [sets, setSets] = useState<CreatorPlaysetSummary[]>([]);
+  const [notifications, setNotifications] = useState<CreatorNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
 
   const [editorMode, setEditorMode] = useState<EditorMode>("create");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -239,6 +246,9 @@ export default function CreatorStudio() {
       if (!session) {
         setProfile(null);
         setSets([]);
+        setNotifications([]);
+        setUnreadCount(0);
+        setNotificationsOpen(false);
         resetEditor();
       }
     });
@@ -248,14 +258,19 @@ export default function CreatorStudio() {
   const loadWorkspace = useCallback(async (accessToken: string) => {
     setLoadingSets(true);
     try {
-      const [page, nextProfile] = await Promise.all([
+      const [page, nextProfile, notifFeed] = await Promise.all([
         listCreatorPlaysets(accessToken),
         fetchCreatorProfile(accessToken).catch(() => null),
+        fetchCreatorNotifications(accessToken).catch(() => null),
       ]);
       setSets(page.playsets);
       if (nextProfile) {
         setProfile(nextProfile);
         setHandleInput(nextProfile.handle);
+      }
+      if (notifFeed) {
+        setNotifications(notifFeed.notifications);
+        setUnreadCount(notifFeed.unreadCount);
       }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Could not load your creator workspace.");
@@ -265,8 +280,37 @@ export default function CreatorStudio() {
   }, []);
 
   useEffect(() => {
-    if (token) void Promise.resolve().then(() => loadWorkspace(token));
+    if (!token) return;
+    void Promise.resolve().then(() => loadWorkspace(token));
+    const onFocus = () => {
+      void fetchCreatorNotifications(token)
+        .then((feed) => {
+          setNotifications(feed.notifications);
+          setUnreadCount(feed.unreadCount);
+        })
+        .catch(() => undefined);
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [loadWorkspace, token]);
+
+  async function handleMarkNotificationsRead(ids?: string[]) {
+    if (!token) return;
+    try {
+      const result = await markCreatorNotificationsRead(token, ids);
+      const nowIso = new Date().toISOString();
+      setUnreadCount(result.unreadCount);
+      setNotifications((current) =>
+        current.map((item) =>
+          !ids || ids.length === 0 || ids.includes(item.id)
+            ? { ...item, readAt: item.readAt ?? nowIso }
+            : item,
+        ),
+      );
+    } catch {
+      // Best-effort notification acknowledgement.
+    }
+  }
 
   const maxItemsPerSet = profile?.maxItemsPerSet ?? 50;
 
@@ -557,9 +601,11 @@ export default function CreatorStudio() {
       }
       await openEditor(current.id);
       setMessage(
-        nextVisibility === "UNLISTED"
+        current.visibility === "UNLISTED"
           ? `Published as unlisted. Share playset ID: ${current.id}.`
-          : "Published. It is now available in solo and multiplayer.",
+          : current.moderationState === "APPROVED"
+            ? "Published. It is now live in Community, solo, and multiplayer."
+            : `Published as unlisted while awaiting moderator approval. Share playset ID: ${current.id} — you’ll receive a notification once approved for Community.`,
       );
       await loadWorkspace(token);
     } catch (publishError) {
@@ -598,8 +644,12 @@ export default function CreatorStudio() {
           });
           revision = updated.revision;
         }
-        await creatorPlaysetAction(token, set.id, "publish", revision);
-        setMessage(`“${set.title}” is live.`);
+        const published = await creatorPlaysetAction(token, set.id, "publish", revision);
+        setMessage(
+          published.visibility === "PUBLIC" && published.moderationState !== "APPROVED"
+            ? `“${set.title}” was published as unlisted while awaiting moderator approval. Share ID: ${published.id} — we’ll notify you when it’s approved for Community.`
+            : `“${set.title}” is live.`,
+        );
       }
       await loadWorkspace(token);
     } catch (actionError) {
@@ -798,6 +848,20 @@ export default function CreatorStudio() {
             </button>
           )}
           <button
+            type="button"
+            aria-expanded={notificationsOpen}
+            onClick={() => setNotificationsOpen((open) => !open)}
+            className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-sm border border-white/25 px-3 text-xs font-bold uppercase tracking-[0.08em] text-white transition hover:border-white hover:bg-white/5"
+          >
+            <Bell size={14} aria-hidden="true" />
+            Notifications
+            {unreadCount > 0 && (
+              <span className="rounded-full bg-[var(--accent-highlight)] px-1.5 py-0.5 text-[10px] font-black text-[#15122b]">
+                {unreadCount}
+              </span>
+            )}
+          </button>
+          <button
             className={SECONDARY}
             onClick={() => {
               resetEditor();
@@ -812,6 +876,147 @@ export default function CreatorStudio() {
           </button>
         </div>
       </header>
+
+      {unreadCount > 0 && !notificationsOpen && notifications[0] && (
+        <div
+          role="status"
+          className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-sm border border-[var(--accent-highlight)]/45 bg-[var(--accent-highlight)]/10 px-4 py-3 text-xs text-white"
+        >
+          <div className="flex items-start gap-2.5">
+            <Bell size={15} className="mt-0.5 shrink-0 text-[var(--accent-highlight)]" aria-hidden="true" />
+            <div>
+              <p className="font-bold text-[var(--accent-highlight)]">
+                {notifications[0].title}
+                {unreadCount > 1 ? ` (+${unreadCount - 1} more)` : ""}
+              </p>
+              <p className="mt-0.5 text-[var(--text-secondary)]">{notifications[0].message}</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setNotificationsOpen(true)}
+              className="rounded-sm border border-white/30 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-white hover:bg-white/10"
+            >
+              View all ({unreadCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleMarkNotificationsRead()}
+              className="rounded-sm bg-[var(--accent-highlight)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-[#15122b]"
+            >
+              Mark read
+            </button>
+          </div>
+        </div>
+      )}
+
+      {notificationsOpen && (
+        <section
+          aria-label="Creator notifications"
+          className="mt-4 rounded-sm border border-white/20 bg-[#191530] p-4"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3">
+            <div className="flex items-center gap-2">
+              <Bell size={15} className="text-[var(--accent-highlight)]" aria-hidden="true" />
+              <h2 className="text-sm font-bold uppercase tracking-[0.08em] text-white">
+                Creator Notifications
+              </h2>
+              {unreadCount > 0 && (
+                <span className="rounded-full bg-[var(--accent-highlight)]/20 px-2 py-0.5 text-[10px] font-bold text-[var(--accent-highlight)]">
+                  {unreadCount} unread
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {unreadCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => void handleMarkNotificationsRead()}
+                  className="rounded-sm border border-white/25 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--accent-highlight)] hover:bg-white/10"
+                >
+                  Mark all read
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setNotificationsOpen(false)}
+                className="text-xs text-[var(--text-muted)] hover:text-white"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+
+          {notifications.length === 0 ? (
+            <p className="py-4 text-xs text-[var(--text-muted)]">
+              No moderation notifications yet. You’ll see updates here whenever a moderator approves,
+              restores, hides, or removes one of your playsets.
+            </p>
+          ) : (
+            <ul className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
+              {notifications.map((notif) => {
+                const unread = !notif.readAt;
+                return (
+                  <li
+                    key={notif.id}
+                    className={`rounded-sm border p-3 text-xs ${
+                      unread
+                        ? "border-[var(--accent-highlight)]/45 bg-[var(--accent-highlight)]/10"
+                        : "border-white/10 bg-black/15"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="font-bold text-white">
+                          {notif.title}
+                          {unread && (
+                            <span className="ml-2 rounded-full bg-[var(--accent-highlight)] px-1.5 py-0.5 text-[9px] font-black uppercase text-[#15122b]">
+                              New
+                            </span>
+                          )}
+                        </p>
+                        <p className="mt-1 text-[var(--text-secondary)]">{notif.message}</p>
+                        <p className="mt-1 text-[10px] text-[var(--text-muted)]">
+                          {new Date(notif.createdAt).toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {notif.playsetId && notif.type === "PLAYSET_APPROVED" && (
+                          <Link
+                            href={`/playsets/${encodeURIComponent(notif.playsetId)}`}
+                            className="rounded-sm border border-emerald-400/40 bg-emerald-950/35 px-2.5 py-1 text-[10px] font-bold uppercase text-emerald-200 hover:bg-emerald-900/50"
+                          >
+                            View public page
+                          </Link>
+                        )}
+                        {notif.playsetId && (
+                          <button
+                            type="button"
+                            onClick={() => void openEditor(notif.playsetId!)}
+                            className="rounded-sm border border-white/25 px-2.5 py-1 text-[10px] font-bold uppercase text-white hover:bg-white/10"
+                          >
+                            Open in editor
+                          </button>
+                        )}
+                        {unread && (
+                          <button
+                            type="button"
+                            onClick={() => void handleMarkNotificationsRead([notif.id])}
+                            className="text-[10px] font-bold uppercase text-[var(--accent-highlight)] hover:underline"
+                          >
+                            Mark read
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      )}
 
       {profile && (
         <section className="mt-5 flex flex-wrap items-center justify-between gap-4 rounded-sm border border-white/15 bg-[#191530] px-4 py-3 text-xs">
@@ -944,6 +1149,20 @@ export default function CreatorStudio() {
               Image uploads are temporarily disabled by platform administrators.
             </div>
           )}
+          {publicSettings.features.mediaStorageConfigured === false && (
+            <div role="status" className="mt-4 rounded-sm border border-amber-400/40 bg-amber-950/35 p-3 text-xs text-amber-200">
+              Image uploads are temporarily unavailable: server media storage is not configured yet.
+            </div>
+          )}
+          {editingSet?.status === "PUBLISHED" &&
+            editingSet.visibility === "PUBLIC" &&
+            editingSet.moderationState === "UNREVIEWED" && (
+              <div role="status" className="mt-4 rounded-sm border border-amber-400/40 bg-amber-950/35 p-3 text-xs leading-5 text-amber-100">
+                <strong>Pending moderator approval — currently unlisted.</strong> Anyone with this
+                playset&apos;s link or ID can play it now. Once approved by a moderator, it will
+                appear in Community and you&apos;ll receive a notification.
+              </div>
+            )}
 
           {editorMode === "create" && (
             <div className="mt-7 rounded-sm border border-white/15 bg-white/[0.03] p-4">
@@ -1260,9 +1479,9 @@ export default function CreatorStudio() {
                   }`}
                 >
                   <Globe2 size={17} className="text-[var(--accent-highlight)]" />
-                  <strong className="mt-2 block text-sm">Public</strong>
+                  <strong className="mt-2 block text-sm">Public (After approval)</strong>
                   <span className="mt-1 block text-[11px] leading-4 text-[var(--text-muted)]">
-                    Listed in solo and multiplayer.
+                    Starts unlisted by link while awaiting review; listed in Community once approved.
                   </span>
                 </button>
                 <button
@@ -1296,6 +1515,13 @@ export default function CreatorStudio() {
                   </span>
                 </button>
               </div>
+              {visibility === "PUBLIC" && (
+                <p className="mt-3 rounded-sm border border-sky-400/35 bg-sky-950/30 p-3 text-xs leading-5 text-sky-100">
+                  Public playsets require moderator approval before appearing in Community. After
+                  you publish, your set starts <strong>unlisted</strong> (playable via direct link
+                  or ID). You&apos;ll be notified here as soon as a moderator or admin approves it.
+                </p>
+              )}
             </div>
           </fieldset>
 
@@ -1412,6 +1638,14 @@ export default function CreatorStudio() {
           <div className="mt-4 space-y-2.5">
             {sets.map((set) => {
               const stats = analyticsByPlayset.get(set.id);
+              const isPendingApproval =
+                set.status === "PUBLISHED" &&
+                set.visibility === "PUBLIC" &&
+                set.moderationState === "UNREVIEWED";
+              const isApprovedPublic =
+                set.status === "PUBLISHED" &&
+                set.visibility === "PUBLIC" &&
+                set.moderationState === "APPROVED";
               return (
                 <article
                   key={set.id}
@@ -1432,16 +1666,32 @@ export default function CreatorStudio() {
                       className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase ${
                         set.moderationState === "REMOVED"
                           ? "bg-red-500/20 text-red-300"
-                          : set.status === "PUBLISHED"
-                            ? "bg-emerald-400/15 text-emerald-300"
-                            : set.status === "ARCHIVED"
-                              ? "bg-white/10 text-white/50"
-                              : "bg-amber-300/15 text-amber-200"
+                          : isPendingApproval
+                            ? "bg-amber-400/20 text-amber-200"
+                            : isApprovedPublic
+                              ? "bg-emerald-400/15 text-emerald-300"
+                              : set.status === "PUBLISHED"
+                                ? "bg-emerald-400/15 text-emerald-300"
+                                : set.status === "ARCHIVED"
+                                  ? "bg-white/10 text-white/50"
+                                  : "bg-amber-300/15 text-amber-200"
                       }`}
                     >
-                      {set.moderationState === "REMOVED" ? "Removed" : statusLabel(set.status)}
+                      {set.moderationState === "REMOVED"
+                        ? "Removed"
+                        : isPendingApproval
+                          ? "Pending approval"
+                          : isApprovedPublic
+                            ? "Approved · Live"
+                            : statusLabel(set.status)}
                     </span>
                   </div>
+
+                  {isPendingApproval && (
+                    <p className="mt-1.5 text-[10px] text-amber-200">
+                      Unlisted until approved by a moderator (playable via link/ID below).
+                    </p>
+                  )}
 
                   {set.moderationState === "HIDDEN" && (
                     <p className="mt-1.5 text-[10px] text-amber-200">
@@ -1463,7 +1713,7 @@ export default function CreatorStudio() {
                     </div>
                   )}
 
-                  {set.visibility === "UNLISTED" && (
+                  {(set.visibility === "UNLISTED" || isPendingApproval) && (
                     <p className="mt-2 break-all rounded bg-black/20 p-1.5 font-mono text-[9px] text-[var(--text-muted)]">
                       {set.id}
                     </p>
