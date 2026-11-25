@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { EyeOff, RotateCcw } from "lucide-react";
+import { EyeOff, ImageDown, LoaderCircle, RotateCcw } from "lucide-react";
 import { useAdminAuth } from "@/components/admin/AdminShell";
 import AdminRefreshButton from "@/components/admin/AdminRefreshButton";
 import AdminTable from "@/components/admin/AdminTable";
@@ -10,8 +10,11 @@ import StatusBadge from "@/components/admin/StatusBadge";
 import NativeModalDialog from "@/components/ui/NativeModalDialog";
 import {
   fetchAdminCatalog,
+  fetchAdminCatalogImageSyncStatus,
   hasMinRole,
+  triggerAdminCatalogImageSync,
   updateAdminCatalogAccess,
+  type CatalogImageSyncStatus,
 } from "@/lib/backend/admin";
 
 type CatalogData = Awaited<ReturnType<typeof fetchAdminCatalog>>;
@@ -25,6 +28,8 @@ export default function AdminCatalogPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<CatalogImageSyncStatus | null>(null);
+  const [startingSync, setStartingSync] = useState(false);
 
   const [accessTarget, setAccessTarget] = useState<{
     category: CatalogRow;
@@ -47,7 +52,44 @@ export default function AdminCatalogPage() {
 
   useEffect(() => {
     void Promise.resolve().then(() => load());
-  }, [load]);
+    void fetchAdminCatalogImageSyncStatus(token)
+      .then(setSyncStatus)
+      .catch(() => undefined);
+  }, [load, token]);
+
+  useEffect(() => {
+    if (!syncStatus?.running) return;
+    const timer = window.setInterval(() => {
+      void fetchAdminCatalogImageSyncStatus(token)
+        .then((next) => {
+          setSyncStatus(next);
+          void load();
+          if (!next.running) {
+            setNotice(
+              next.lastError
+                ? `Image sync finished with error: ${next.lastError}`
+                : `Synced ${next.updated} image(s) to Supabase Storage (${next.enriched} newly enriched, ${next.failed} failed).`,
+            );
+          }
+        })
+        .catch(() => undefined);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [load, syncStatus?.running, token]);
+
+  async function startImageSync() {
+    setStartingSync(true);
+    setError("");
+    try {
+      const next = await triggerAdminCatalogImageSync(token);
+      setSyncStatus(next);
+      setNotice("Started mirroring and compressing catalog images to Supabase Storage…");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start catalog image sync.");
+    } finally {
+      setStartingSync(false);
+    }
+  }
 
   const categories = data?.categories ?? [];
   const supportedCount = categories.filter((c) => c.availability === "SUPPORTED").length;
@@ -100,11 +142,30 @@ export default function AdminCatalogPage() {
             Provider status, refresh freshness, storage images, and admin hide/reinstate controls across official categories.
           </p>
         </div>
-        <AdminRefreshButton
-          tabKey="catalog"
-          onRefresh={load}
-          serverUpdatedAt={latestRefreshedAt}
-        />
+        <div className="flex flex-wrap items-center gap-3">
+          {isAdmin && (
+            <button
+              type="button"
+              disabled={startingSync || Boolean(syncStatus?.running)}
+              onClick={() => void startImageSync()}
+              className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-sm border border-[var(--accent-highlight)]/60 bg-[var(--accent-highlight)]/15 px-3.5 text-xs font-bold uppercase tracking-[0.08em] text-[var(--accent-highlight)] transition hover:bg-[var(--accent-highlight)] hover:text-[#15122b] disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              {syncStatus?.running || startingSync ? (
+                <LoaderCircle size={14} className="animate-spin" />
+              ) : (
+                <ImageDown size={14} />
+              )}
+              {syncStatus?.running
+                ? `Syncing Images (${syncStatus.processed}/${syncStatus.totalPending || "…"})`
+                : "Sync Storage Images"}
+            </button>
+          )}
+          <AdminRefreshButton
+            tabKey="catalog"
+            onRefresh={load}
+            serverUpdatedAt={latestRefreshedAt}
+          />
+        </div>
       </header>
 
       {/* Catalog Summary Strip */}

@@ -648,6 +648,25 @@ export const updateAdminCatalogAccess = (
   body: { action: "HIDE" | "RESTORE"; allowStaleOverride?: boolean; reason: string },
 ) => adminRequest(token, `catalog/${encodeURIComponent(categoryId)}/access`, "POST", body);
 
+export interface CatalogImageSyncStatus {
+  running: boolean;
+  startedAt: string | null;
+  finishedAt: string | null;
+  totalPending: number;
+  processed: number;
+  enriched: number;
+  compressed: number;
+  updated: number;
+  failed: number;
+  lastError: string | null;
+}
+
+export const fetchAdminCatalogImageSyncStatus = (token: string) =>
+  adminRequest<CatalogImageSyncStatus>(token, "catalog/sync-images");
+
+export const triggerAdminCatalogImageSync = (token: string) =>
+  adminRequest<CatalogImageSyncStatus>(token, "catalog/sync-images", "POST", {});
+
 export const fetchAdminSystem = (token: string) =>
   adminRequest<{
     dbReady: boolean;
