@@ -142,18 +142,18 @@ export default function AdminCatalogPage() {
             Provider status, refresh freshness, storage images, and admin hide/reinstate controls across official categories.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-start gap-3">
           {isAdmin && (
             <button
               type="button"
               disabled={startingSync || Boolean(syncStatus?.running)}
               onClick={() => void startImageSync()}
-              className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-sm border border-[var(--accent-highlight)]/60 bg-[var(--accent-highlight)]/15 px-3.5 text-xs font-bold uppercase tracking-[0.08em] text-[var(--accent-highlight)] transition hover:bg-[var(--accent-highlight)] hover:text-[#15122b] disabled:cursor-not-allowed disabled:opacity-55"
+              className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-sm border border-[var(--accent-highlight)]/60 bg-[var(--accent-highlight)]/15 px-3 text-xs font-bold uppercase text-[var(--accent-highlight)] transition hover:bg-[var(--accent-highlight)] hover:text-[#15122b] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {syncStatus?.running || startingSync ? (
-                <LoaderCircle size={14} className="animate-spin" />
+                <LoaderCircle size={13} className="animate-spin" />
               ) : (
-                <ImageDown size={14} />
+                <ImageDown size={13} />
               )}
               {syncStatus?.running
                 ? `Syncing Images (${syncStatus.processed}/${syncStatus.totalPending || "…"})`
