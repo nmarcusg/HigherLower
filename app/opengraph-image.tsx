@@ -1,10 +1,18 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { ImageResponse } from "next/og";
 
 export const alt = "Higher or Lower — Free Trivia & Party Comparison Game";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
+function getLogoDataUri(): string {
+  const bytes = readFileSync(join(process.cwd(), "public", "logo.png"));
+  return `data:image/png;base64,${bytes.toString("base64")}`;
+}
+
 export default function OpenGraphImage() {
+  const logoSrc = getLogoDataUri();
   return new ImageResponse(
     (
       <div
@@ -67,17 +75,32 @@ export default function OpenGraphImage() {
           <div
             style={{
               display: "flex",
-              alignItems: "baseline",
-              gap: "20px",
-              fontSize: 92,
-              fontWeight: 800,
-              letterSpacing: "-0.04em",
-              lineHeight: 1,
+              alignItems: "center",
+              gap: "24px",
             }}
           >
-            <span style={{ color: "#ffffff" }}>HIGHER</span>
-            <span style={{ color: "#05d9e8" }}>OR</span>
-            <span style={{ color: "#ff2a6d" }}>LOWER</span>
+            <img
+              src={logoSrc}
+              alt=""
+              width={108}
+              height={108}
+              style={{ borderRadius: "9999px", flexShrink: 0 }}
+            />
+            <div
+              style={{
+                display: "flex",
+                alignItems: "baseline",
+                gap: "20px",
+                fontSize: 88,
+                fontWeight: 800,
+                letterSpacing: "-0.04em",
+                lineHeight: 1,
+              }}
+            >
+              <span style={{ color: "#ffffff" }}>HIGHER</span>
+              <span style={{ color: "#05d9e8" }}>OR</span>
+              <span style={{ color: "#ff2a6d" }}>LOWER</span>
+            </div>
           </div>
           <div
             style={{

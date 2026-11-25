@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -23,7 +24,6 @@ import {
   Menu,
   ScrollText,
   Settings,
-  Shield,
   Users,
   X,
 } from "lucide-react";
@@ -176,10 +176,17 @@ export default function AdminShell({ children }: { children: ReactNode }) {
     return (
       <main className="flex min-h-dvh items-center justify-center bg-[#0b0d17] p-6 text-white">
         <section className="w-full max-w-md rounded-md border border-white/15 bg-[#121628] p-7 shadow-2xl">
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-[var(--accent-highlight)]">
-            <Shield size={16} /> Higher or Lower · Staff
+          <div className="flex items-center gap-2.5 text-xs font-bold tracking-[0.08em] text-[var(--accent-highlight)]">
+            <Image
+              src="/logo.png"
+              alt="HigherOrLower logo"
+              width={28}
+              height={28}
+              className="size-7 shrink-0 rounded-full"
+            />
+            <span>HigherOrLower Admin</span>
           </div>
-          <h1 className="mt-3 text-2xl font-bold">Admin Console Sign-In</h1>
+          <h1 className="mt-3 text-2xl font-bold">HigherOrLower Admin Sign-In</h1>
           <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">
             Authorized moderators, administrators, and superadmins only. Sign in with your linked
             Discord or Google account.
@@ -289,8 +296,15 @@ export default function AdminShell({ children }: { children: ReactNode }) {
         <aside className="hidden border-r border-white/10 bg-[#101322] lg:sticky lg:top-0 lg:flex lg:h-dvh lg:flex-col lg:justify-between lg:overflow-y-auto">
           <div>
             <div className="border-b border-white/10 px-5 py-4">
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-[var(--accent-highlight)]">
-                <Shield size={15} /> Admin Console
+              <div className="flex items-center gap-2.5 text-xs font-bold tracking-[0.06em] text-[var(--accent-highlight)]">
+                <Image
+                  src="/logo.png"
+                  alt="HigherOrLower logo"
+                  width={28}
+                  height={28}
+                  className="size-7 shrink-0 rounded-full"
+                />
+                <span>HigherOrLower Admin</span>
               </div>
               <p className="mt-1 truncate text-xs text-[var(--text-muted)]">
                 {identity.displayName || identity.email || identity.userId}
@@ -354,8 +368,15 @@ export default function AdminShell({ children }: { children: ReactNode }) {
 
         {/* Mobile Header */}
         <div className="flex items-center justify-between border-b border-white/10 bg-[#101322] px-4 py-3 lg:hidden">
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-[var(--accent-highlight)]">
-            <Shield size={15} /> Admin · {identity.role}
+          <div className="flex items-center gap-2 text-xs font-bold tracking-[0.06em] text-[var(--accent-highlight)]">
+            <Image
+              src="/logo.png"
+              alt="HigherOrLower logo"
+              width={24}
+              height={24}
+              className="size-6 shrink-0 rounded-full"
+            />
+            <span>HigherOrLower Admin · {identity.role}</span>
           </div>
           <button
             type="button"

@@ -4,8 +4,8 @@ import AdminShell from "@/components/admin/AdminShell";
 
 export const metadata: Metadata = {
   title: {
-    default: "Admin Console",
-    template: "%s — Admin · Higher or Lower",
+    default: "HigherOrLower Admin",
+    template: "%s — HigherOrLower Admin",
   },
   robots: {
     index: false,
