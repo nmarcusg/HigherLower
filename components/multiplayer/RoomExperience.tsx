@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowLeft, ArrowUp, Check, Copy, Crown, LoaderCircle, LogOut, RotateCcw, Trophy, Users, UserX, Wifi, WifiOff } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Check, Copy, Crown, LoaderCircle, LogOut, RotateCcw, Trophy, Users, UserX, WifiOff } from "lucide-react";
 import type { Socket } from "socket.io-client";
 import {
   clearRoomCredential,
@@ -895,10 +895,15 @@ export default function RoomExperience({ initialSessionId, initialEntry }: { ini
                 compact
               />
             )}
-          <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">
-            {connected ? <Wifi size={12} className="text-[var(--accent-highlight)]" /> : <WifiOff size={12} className="text-amber-300" />}
-            {connected ? "Connected" : "Reconnecting"}
-          </span>
+          {!connected && (
+            <span
+              role="status"
+              className="inline-flex items-center gap-2 rounded-full border border-amber-400/45 bg-amber-950/45 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-amber-200"
+            >
+              <WifiOff size={12} aria-hidden="true" />
+              Reconnecting…
+            </span>
+          )}
         </div>
       </header>
 

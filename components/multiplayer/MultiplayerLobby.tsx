@@ -6,12 +6,8 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ArrowUpRight,
-  Check,
-  Copy,
-  Crown,
   LoaderCircle,
   Trophy,
-  Users,
   Wifi,
 } from "lucide-react";
 import {
@@ -23,7 +19,6 @@ import {
   joinRoom,
   type CategorySummary,
   type PublicPlaysetSummary,
-  type RoomCredentialResponse,
   type RoomMode,
 } from "@/lib/backend";
 import {
@@ -92,9 +87,7 @@ export default function MultiplayerLobby() {
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [playsetId, setPlaysetId] = useState("");
   const [status, setStatus] = useState("");
-  const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [room, setRoom] = useState<RoomCredentialResponse | null>(null);
   const [roundCount, setRoundCount] = useState(5);
   const [answerTimeSeconds, setAnswerTimeSeconds] = useState<3 | 5 | 10 | 15>(15);
   const [matchDurationMinutes, setMatchDurationMinutes] = useState(5);
@@ -308,10 +301,6 @@ export default function MultiplayerLobby() {
         nickname,
         entry: "create",
       });
-      setRoom({
-        ...credential,
-        state: credential.state as Record<string, unknown>,
-      });
       setStatus(`Room ${credential.roomCode} is ready. Opening the room…`);
       router.push(`/multiplayer/room/${encodeURIComponent(credential.sessionId)}?entry=create`);
     } catch (error) {
@@ -353,10 +342,6 @@ export default function MultiplayerLobby() {
         nickname,
         entry: isWatchOnly ? "spectate" : "join",
       });
-      setRoom({
-        ...credential,
-        state: credential.state as Record<string, unknown>,
-      });
       setStatus(`Joined room ${credential.roomCode}. Opening the room…`);
       router.push(
         `/multiplayer/room/${encodeURIComponent(credential.sessionId)}?entry=${
@@ -367,16 +352,6 @@ export default function MultiplayerLobby() {
       reportError(error);
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function copyInvite() {
-    try {
-      await navigator.clipboard.writeText(room?.roomCode || "");
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
-    } catch {
-      setStatus("Invite links will be available when rooms are online.");
     }
   }
 
@@ -399,22 +374,13 @@ export default function MultiplayerLobby() {
         >
           <ArrowLeft size={16} aria-hidden="true" /> Back to game
         </Link>
-        <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">
-          <span className="size-1.5 rounded-full bg-[var(--accent-highlight)]" /> Multiplayer beta
-        </span>
       </header>
 
-      <section className="mx-auto w-full max-w-4xl flex-1 py-12 sm:py-16">
-        <div className="mb-9 text-center sm:mb-12">
-          <div className="mb-4 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.28em] text-[var(--accent-action-higher)]">
-            <Users size={15} aria-hidden="true" /> Play together
-          </div>
+      <section className="mx-auto w-full max-w-4xl flex-1 py-10 sm:py-14">
+        <div className="mb-8 text-center sm:mb-10">
           <h1 className="text-4xl font-bold leading-none tracking-[-0.07em] text-white [text-shadow:4px_4px_0_var(--accent-time-attack)] sm:text-6xl">
             MULTIPLAYER
           </h1>
-          <p className="mx-auto mt-5 max-w-xl text-sm leading-6 text-[var(--text-secondary)] sm:text-base">
-            Bring your friends. Compare your instincts. The room is yours.
-          </p>
         </div>
 
         <div className="grid gap-5 md:grid-cols-[1.1fr_0.9fr]">
@@ -422,18 +388,10 @@ export default function MultiplayerLobby() {
             className="rounded-md border border-white/20 bg-[#1b1734]/90 p-5 shadow-[0_8px_0_var(--accent-classic)] sm:p-7"
             aria-labelledby="create-title"
           >
-            <div className="mb-6 flex items-start justify-between gap-4">
-              <div>
-                <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-action-higher)]">
-                  Host a match
-                </p>
-                <h2 id="create-title" className="text-2xl font-bold">
-                  Create room
-                </h2>
-              </div>
-              <span className="grid size-10 place-items-center rounded-sm border border-white/20 bg-white/[0.04] text-[var(--accent-highlight)]">
-                <Crown size={18} aria-hidden="true" />
-              </span>
+            <div className="mb-5">
+              <h2 id="create-title" className="text-2xl font-bold">
+                Create room
+              </h2>
             </div>
 
             {!roomsCreateEnabled && (
@@ -547,41 +505,17 @@ export default function MultiplayerLobby() {
               disabled={busy || !roomsCreateEnabled}
               type="button"
               onClick={handleCreate}
-              className="group relative flex min-h-12 w-full items-center justify-center gap-2 rounded-sm bg-[var(--accent-time-attack)] px-4 text-sm font-bold uppercase tracking-[0.12em] text-white transition hover:brightness-110 active:translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-55"
+              className="group relative flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-sm bg-[var(--accent-time-attack)] px-4 text-sm font-bold uppercase tracking-[0.12em] text-white transition hover:brightness-110 active:translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-55"
             >
               {busy ? "Connecting…" : "Create room"} <ArrowUpRight size={16} aria-hidden="true" />
             </button>
-            <div className="mt-5 flex items-center justify-between border-t border-white/10 pt-4 text-[11px] text-[var(--text-muted)]">
-              <span>Room status</span>
-              <span className="inline-flex items-center gap-2">
-                <span className="size-1.5 rounded-full bg-[var(--accent-highlight)]" />{" "}
-                {room ? "Ready" : "Waiting to connect"}
-              </span>
-            </div>
-            <div className="mt-3 flex items-center justify-between rounded-sm border border-dashed border-white/15 px-3 py-2.5 text-xs text-[var(--text-muted)]">
-              <span className="inline-flex items-center gap-2">
-                <Users size={14} /> {room ? `Room ${room.roomCode}` : "Room size set by mode"}
-              </span>
-              <button
-                disabled={!room}
-                type="button"
-                onClick={copyInvite}
-                className="inline-flex items-center gap-1.5 font-bold text-[var(--text-secondary)] hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-                aria-label="Copy room code"
-              >
-                {copied ? <Check size={13} /> : <Copy size={13} />} {copied ? "Copied" : "Copy code"}
-              </button>
-            </div>
           </section>
 
           <section
             className="flex flex-col rounded-md border border-white/20 bg-[#1b1734]/75 p-5 sm:p-7"
             aria-labelledby="join-title"
           >
-            <div className="mb-6">
-              <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-time-attack)]">
-                Got an invite?
-              </p>
+            <div className="mb-5">
               <h2 id="join-title" className="text-2xl font-bold">
                 Join room
               </h2>
@@ -749,9 +683,6 @@ export default function MultiplayerLobby() {
         >
           {status}
         </div>
-        <p className="mt-2 text-center text-[10px] uppercase tracking-[0.14em] text-[var(--text-muted)]">
-          Rooms, live matches, reconnects and spectator scoreboards are available
-        </p>
         <AdSlot slot="lobby_sidebar" className="mt-6" />
       </section>
       <footer className="flex flex-wrap items-center justify-center gap-4 pb-2 text-[10px] uppercase tracking-[0.12em] text-white/35">

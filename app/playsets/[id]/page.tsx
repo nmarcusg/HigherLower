@@ -6,7 +6,6 @@ import { ArrowLeft, Layers3, Play, Sparkles, Timer, Users } from "lucide-react";
 import BackendSoloGame from "@/components/game/BackendSoloGame";
 import ReportPlaysetDialog from "@/components/playsets/ReportPlaysetDialog";
 import { fetchPublicPlayset } from "@/lib/backend/client";
-import { decimalPrecisionLabel, formatPlaysetDisplayValue } from "@/lib/playsets/format";
 import { getSiteUrl, serializeJsonLd, truncateMetaDescription } from "@/lib/seo/site";
 
 const loadPublicPlayset = cache((id: string) => fetchPublicPlayset(id));
@@ -161,36 +160,21 @@ export default async function PublicPlaysetGamePage({
           </Link>
           <div className="flex flex-wrap items-center gap-2">
             {!builtIn && <ReportPlaysetDialog playsetId={playset.id} playsetTitle={playset.title} />}
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.04] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent-highlight)]">
-              <Layers3 size={12} aria-hidden="true" />
-              {isPendingApproval
-                ? "Pending approval · Unlisted"
-                : isUnlisted
-                  ? "Unlisted set"
-                  : builtIn
-                    ? "Official set"
-                    : "Community set"}
-            </span>
+            {(isPendingApproval || isUnlisted) && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/35 bg-amber-950/35 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-amber-200">
+                <Layers3 size={12} aria-hidden="true" />
+                {isPendingApproval ? "Pending approval · Unlisted" : "Unlisted set"}
+              </span>
+            )}
           </div>
         </header>
 
         <section className="mx-auto w-full max-w-4xl flex-1 py-10 sm:py-14">
           <div className="rounded-md border border-white/20 bg-[#1b1734]/90 p-6 shadow-[0_8px_0_var(--accent-classic)] sm:p-8">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-action-higher)]">
-                  {playset.itemCount} items · {playset.metricName} ({playset.metricUnit})
-                </p>
-                {!builtIn && (
-                  <span className="rounded-sm border border-white/15 bg-white/[0.04] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]">
-                    Display format:{" "}
-                    <strong className="text-[var(--accent-highlight)]">
-                      {formatPlaysetDisplayValue(1234.56, playset.metricUnit, playset.decimalPlaces ?? null)}
-                    </strong>{" "}
-                    ({decimalPrecisionLabel(playset.decimalPlaces)})
-                  </span>
-                )}
-              </div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent-action-higher)]">
+                {playset.itemCount} items · {playset.metricName} ({playset.metricUnit})
+              </p>
               {playset.creator && (
                 <span className="inline-flex items-center gap-1.5 rounded-sm border border-white/15 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
                   @{playset.creator.handle}
@@ -223,48 +207,48 @@ export default async function PublicPlaysetGamePage({
                 href={`/playsets/${encodeURIComponent(playset.id)}?mode=classic`}
                 className="group flex flex-col justify-between rounded-sm border border-white/25 bg-white/[0.04] p-4 transition hover:-translate-y-0.5 hover:border-[var(--accent-action-higher)] hover:bg-[var(--accent-action-higher)]/10"
               >
-                <div>
-                  <Play size={20} className="text-[var(--accent-action-higher)]" aria-hidden="true" />
-                  <h2 className="mt-3 text-base font-bold text-white">Play Classic</h2>
+                <div className="flex items-center justify-between gap-2">
+                  <Play size={18} className="text-[var(--accent-action-higher)]" aria-hidden="true" />
+                  <span className="text-xs font-bold text-[var(--accent-action-higher)]" aria-hidden="true">→</span>
+                </div>
+                <div className="mt-3">
+                  <h2 className="text-base font-bold text-white group-hover:underline">Play Classic</h2>
                   <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
-                    Untimed survival run on this playset.
+                    Untimed survival run.
                   </p>
                 </div>
-                <span className="mt-4 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent-action-higher)] group-hover:underline">
-                  Start Classic →
-                </span>
               </Link>
 
               <Link
                 href={`/playsets/${encodeURIComponent(playset.id)}?mode=time-attack`}
                 className="group flex flex-col justify-between rounded-sm border border-white/25 bg-white/[0.04] p-4 transition hover:-translate-y-0.5 hover:border-[var(--accent-time-attack)] hover:bg-[var(--accent-time-attack)]/10"
               >
-                <div>
-                  <Timer size={20} className="text-[var(--accent-time-attack)]" aria-hidden="true" />
-                  <h2 className="mt-3 text-base font-bold text-white">Play Time Attack</h2>
+                <div className="flex items-center justify-between gap-2">
+                  <Timer size={18} className="text-[var(--accent-time-attack)]" aria-hidden="true" />
+                  <span className="text-xs font-bold text-[var(--accent-time-attack)]" aria-hidden="true">→</span>
+                </div>
+                <div className="mt-3">
+                  <h2 className="text-base font-bold text-white group-hover:underline">Play Time Attack</h2>
                   <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
-                    Beat the clock with time bonuses and penalties.
+                    Beat the clock with time bonuses.
                   </p>
                 </div>
-                <span className="mt-4 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent-time-attack)] group-hover:underline">
-                  Start Time Attack →
-                </span>
               </Link>
 
               <Link
                 href={`/multiplayer?playset=${encodeURIComponent(playset.id)}`}
                 className="group flex flex-col justify-between rounded-sm border border-[var(--accent-highlight)]/45 bg-[var(--accent-highlight)]/10 p-4 transition hover:-translate-y-0.5 hover:border-[var(--accent-highlight)]"
               >
-                <div>
-                  <Users size={20} className="text-[var(--accent-highlight)]" aria-hidden="true" />
-                  <h2 className="mt-3 text-base font-bold text-white">Host Multiplayer Room</h2>
+                <div className="flex items-center justify-between gap-2">
+                  <Users size={18} className="text-[var(--accent-highlight)]" aria-hidden="true" />
+                  <span className="text-xs font-bold text-[var(--accent-highlight)]" aria-hidden="true">→</span>
+                </div>
+                <div className="mt-3">
+                  <h2 className="text-base font-bold text-white group-hover:underline">Host Multiplayer</h2>
                   <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
-                    Create a party room preloaded with this playset.
+                    Start a party room with this set.
                   </p>
                 </div>
-                <span className="mt-4 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent-highlight)] group-hover:underline">
-                  Open Multiplayer →
-                </span>
               </Link>
             </div>
           </div>

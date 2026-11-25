@@ -1216,19 +1216,10 @@ export default function CreatorStudio() {
 
       <div className="mt-7 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_340px]">
         <section className="min-w-0 rounded-md border border-white/20 bg-[#1b1734] p-5 sm:p-7">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-highlight)]">
-                {editorMode === "edit" ? "Editing playset" : "New playset"}
-              </p>
-              <h1 className="mt-2 text-3xl font-bold sm:text-4xl">
-                {editorMode === "edit" ? title || "Untitled draft" : "MAKE IT COMPARABLE"}
-              </h1>
-              <p className="mt-2 max-w-xl text-sm leading-6 text-[var(--text-secondary)]">
-                Every row needs an item name and a number. Use the same unit for every row—for
-                example, all populations in people or all prices in USD.
-              </p>
-            </div>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <h1 className="text-2xl font-bold sm:text-3xl">
+              {editorMode === "edit" ? title || "Untitled draft" : "New playset"}
+            </h1>
             {editingSet && (
               <div className="flex flex-wrap gap-2">
                 <span className="rounded-sm border border-white/20 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
@@ -1315,27 +1306,21 @@ export default function CreatorStudio() {
             )}
 
           {editorMode === "create" && (
-            <div className="mt-7 rounded-sm border border-white/15 bg-white/[0.03] p-4">
-              <div className="flex items-center gap-2">
-                <Sparkles size={15} className="text-[var(--accent-highlight)]" />
-                <h2 className="text-xs font-bold uppercase tracking-[0.1em]">Start from an example</h2>
-              </div>
-              <p className="mt-1.5 text-xs text-[var(--text-muted)]">
-                Templates are editable. Values use real-world estimates and can be replaced.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {TEMPLATES.map((template) => (
-                  <button
-                    key={template.label}
-                    type="button"
-                    className={SECONDARY}
-                    onClick={() => applyTemplate(template)}
-                  >
-                    {template.label}
-                    <ArrowRight size={13} />
-                  </button>
-                ))}
-              </div>
+            <div className="mt-5 flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--text-muted)]">
+                Templates:
+              </span>
+              {TEMPLATES.map((template) => (
+                <button
+                  key={template.label}
+                  type="button"
+                  className={`${SECONDARY} cursor-pointer`}
+                  onClick={() => applyTemplate(template)}
+                >
+                  {template.label}
+                  <ArrowRight size={13} />
+                </button>
+              ))}
             </div>
           )}
 

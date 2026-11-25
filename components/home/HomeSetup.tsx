@@ -353,8 +353,6 @@ export default function HomeSetup({ catalog }: HomeSetupProps) {
               className="mt-4 w-full max-w-xs self-end text-right text-xs leading-relaxed text-[var(--foreground-muted)] sm:text-sm"
               variants={heroChildVariants}
             >
-              the comparison game for students
-              <br />
               {domains.length} domains, {domains.reduce((sum, domain) => sum + domain.categoryCount, 0)} categories, free
             </motion.p>
             <motion.a
@@ -450,12 +448,9 @@ export default function HomeSetup({ catalog }: HomeSetupProps) {
 
 
         <section
-          aria-labelledby="ready-heading"
+          aria-label="Start game"
           className="flex flex-col items-center gap-4 pt-[clamp(2.5rem,6vw,5rem)] pb-24 text-center sm:pb-32"
         >
-          <h2 id="ready-heading" className="text-4xl font-bold sm:text-5xl">
-            Ready?
-          </h2>
           <button
             ref={goButtonRef}
             type="button"

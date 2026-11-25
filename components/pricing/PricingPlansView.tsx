@@ -10,10 +10,7 @@ import {
   Copy,
   Crown,
   ExternalLink,
-  Layers3,
-  ShieldCheck,
   Sparkles,
-  Trash2,
 } from "lucide-react";
 import {
   fetchCreatorProfile,
@@ -34,24 +31,6 @@ interface ComparisonRow {
   free: string;
   pro: string;
 }
-
-const SLOT_RULES = [
-  {
-    title: "What counts toward active slots",
-    body: "Active drafts and published sets (including sets flagged by moderation) count toward your slot cap—3 on Free, or 25 on Creator Pro.",
-    icon: Layers3,
-  },
-  {
-    title: "Archive vs. Permanent Delete",
-    body: "Neither archived nor permanently deleted playsets count toward active slots. Free accounts can archive 1 playset per 24 hours; permanent delete works anytime with zero cooldown.",
-    icon: Trash2,
-  },
-  {
-    title: "Device pool & One-Time Pro",
-    body: "Free-tier sign-ins on the same browser/device share one 3-slot pool so alt accounts stay fair. Creator Pro gives your account 25 dedicated active slots permanently for one payment.",
-    icon: ShieldCheck,
-  },
-] as const;
 
 const FAQ_ITEMS = [
   {
@@ -327,17 +306,7 @@ export default function PricingPlansView() {
         <div className="mt-8 grid gap-6 md:grid-cols-2">
           {/* Free Tier Card */}
           <article className="flex flex-col rounded-md border border-white/20 bg-[#1b1734]/90 p-6 shadow-[0_8px_0_var(--accent-classic)]">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">
-                  Default Account
-                </p>
-                <h2 className="mt-1 text-2xl font-bold text-white">Free Tier</h2>
-              </div>
-              <span className="rounded-sm border border-white/20 bg-white/5 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--text-secondary)]">
-                Included
-              </span>
-            </div>
+            <h2 className="text-2xl font-bold text-white">Free Tier</h2>
 
             <div className="mt-4 flex items-baseline gap-2 border-b border-white/10 pb-4">
               <span className="text-4xl font-bold text-white">₱0 / $0</span>
@@ -384,18 +353,10 @@ export default function PricingPlansView() {
 
           {/* Creator Pro Card */}
           <article className="flex flex-col rounded-md border-2 border-[var(--accent-highlight)]/75 bg-[#20193f] p-6 shadow-[0_8px_0_var(--accent-time-attack)]">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-highlight)]">
-                  Lifetime Creator Unlock
-                </p>
-                <h2 className="mt-1 text-2xl font-bold text-white">Creator Pro</h2>
-              </div>
-              <span className="inline-flex items-center gap-1 rounded-sm bg-[var(--accent-highlight)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-[#15122b]">
-                <Crown size={11} aria-hidden="true" />
-                One-Time
-              </span>
-            </div>
+            <h2 className="flex items-center gap-2 text-2xl font-bold text-white">
+              <Crown size={20} className="text-[var(--accent-highlight)]" aria-hidden="true" />
+              Creator Pro
+            </h2>
 
             <div className="mt-4 flex flex-wrap items-baseline gap-2 border-b border-white/10 pb-4">
               <span className="text-4xl font-bold text-[var(--accent-highlight)]">
@@ -470,37 +431,6 @@ export default function PricingPlansView() {
             </div>
           </article>
         </div>
-
-        {/* How Slots Work */}
-        <section className="mt-12" aria-labelledby="how-slots-work-heading">
-          <h2 id="how-slots-work-heading" className="text-xl font-bold text-white sm:text-2xl">
-            How Active Playset Slots Work
-          </h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--text-secondary)]">
-            Only live drafts and published playsets use up your active slots. Archiving a set keeps a
-            read-only snapshot in your library, while deleting removes it permanently—either action
-            frees a slot right away.
-          </p>
-          <div className="mt-5 grid gap-4 md:grid-cols-3">
-            {SLOT_RULES.map((rule) => {
-              const Icon = rule.icon;
-              return (
-                <article
-                  key={rule.title}
-                  className="rounded-md border border-white/15 bg-[#1b1734]/80 p-5"
-                >
-                  <Icon
-                    size={18}
-                    className="text-[var(--accent-highlight)]"
-                    aria-hidden="true"
-                  />
-                  <h3 className="mt-3 text-base font-bold text-white">{rule.title}</h3>
-                  <p className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">{rule.body}</p>
-                </article>
-              );
-            })}
-          </div>
-        </section>
 
         {/* Responsive Plan Comparison Table */}
         <section className="mt-12" aria-labelledby="plan-comparison-heading">

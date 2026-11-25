@@ -22,7 +22,7 @@ function isBuiltIn(playset: PublicPlaysetSummary): boolean {
   return playset.id.startsWith("system-");
 }
 
-function PlaysetCard({ playset }: { playset: PublicPlaysetSummary }) {
+function PlaysetCard({ playset, showBadge = true }: { playset: PublicPlaysetSummary; showBadge?: boolean }) {
   const builtIn = isBuiltIn(playset);
   return (
     <Link
@@ -31,17 +31,19 @@ function PlaysetCard({ playset }: { playset: PublicPlaysetSummary }) {
     >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <div className="mb-2 flex items-center gap-2">
-            <span
-              className={`rounded-sm border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] ${
-                builtIn
-                  ? "border-[var(--accent-action-higher)]/40 bg-[var(--accent-action-higher)]/10 text-[var(--accent-action-higher)]"
-                  : "border-[var(--accent-highlight)]/40 bg-[var(--accent-highlight)]/10 text-[var(--accent-highlight)]"
-              }`}
-            >
-              {builtIn ? "Official" : "Community"}
-            </span>
-          </div>
+          {showBadge && (
+            <div className="mb-2 flex items-center gap-2">
+              <span
+                className={`rounded-sm border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] ${
+                  builtIn
+                    ? "border-[var(--accent-action-higher)]/40 bg-[var(--accent-action-higher)]/10 text-[var(--accent-action-higher)]"
+                    : "border-[var(--accent-highlight)]/40 bg-[var(--accent-highlight)]/10 text-[var(--accent-highlight)]"
+                }`}
+              >
+                {builtIn ? "Official" : "Community"}
+              </span>
+            </div>
+          )}
           <h3 className="text-xl font-bold text-white group-hover:[text-shadow:2px_2px_0_var(--accent-classic)]">
             {playset.title}
           </h3>
@@ -87,6 +89,7 @@ export default function PlaysetsLibrary({
   const [loadingMore, setLoadingMore] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [unlistedId, setUnlistedId] = useState("");
+  const [unlistedOpen, setUnlistedOpen] = useState(false);
 
   const activeRequestRef = useRef<AbortController | null>(null);
   const skipInitialFetchRef = useRef(true);
@@ -263,40 +266,49 @@ export default function PlaysetsLibrary({
           </form>
         </search>
 
-        <form
-          onSubmit={handleOpenUnlisted}
-          className="mt-4 flex flex-col gap-2.5 border-t border-white/10 pt-4 sm:flex-row sm:items-end"
-        >
-          <div className="flex-1">
-            <label
-              htmlFor={unlistedInputId}
-              className="mb-1 block text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]"
-            >
-              Have an unlisted playset ID?
-            </label>
-            <input
-              id={unlistedInputId}
-              name="unlistedId"
-              type="text"
-              value={unlistedId}
-              onChange={(event) => setUnlistedId(event.target.value)}
-              placeholder="Paste published playset ID…"
-              autoCorrect="off"
-              autoCapitalize="none"
-              spellCheck={false}
-              enterKeyHint="go"
-              className="min-h-11 w-full rounded-sm border border-white/20 bg-[#15122b] px-3.5 py-2 text-base text-white outline-none transition placeholder:text-white/35 focus:border-[var(--focus-ring)] focus:ring-2 focus:ring-[var(--focus-ring)]/30"
-            />
-          </div>
+        <div className="mt-4 border-t border-white/10 pt-3">
           <button
-            type="submit"
-            disabled={!unlistedId.trim()}
-            className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-sm border border-white/35 px-4 text-xs font-bold uppercase tracking-[0.12em] text-white transition hover:bg-white hover:text-[#15122b] disabled:cursor-not-allowed disabled:opacity-45"
+            type="button"
+            aria-expanded={unlistedOpen}
+            onClick={() => setUnlistedOpen((open) => !open)}
+            className="cursor-pointer text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--text-muted)] transition hover:text-white"
           >
-            Open set
-            <ArrowUpRight size={14} aria-hidden="true" />
+            {unlistedOpen ? "Hide unlisted ID" : "Have an unlisted playset ID?"}
           </button>
-        </form>
+          {unlistedOpen && (
+            <form
+              onSubmit={handleOpenUnlisted}
+              className="mt-3 flex flex-col gap-2.5 sm:flex-row sm:items-end"
+            >
+              <div className="flex-1">
+                <label htmlFor={unlistedInputId} className="sr-only">
+                  Unlisted playset ID
+                </label>
+                <input
+                  id={unlistedInputId}
+                  name="unlistedId"
+                  type="text"
+                  value={unlistedId}
+                  onChange={(event) => setUnlistedId(event.target.value)}
+                  placeholder="Paste published playset ID…"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  enterKeyHint="go"
+                  className="min-h-11 w-full rounded-sm border border-white/20 bg-[#15122b] px-3.5 py-2 text-base text-white outline-none transition placeholder:text-white/35 focus:border-[var(--focus-ring)] focus:ring-2 focus:ring-[var(--focus-ring)]/30"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={!unlistedId.trim()}
+                className="inline-flex min-h-11 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-sm border border-white/35 px-4 text-xs font-bold uppercase tracking-[0.12em] text-white transition hover:bg-white hover:text-[#15122b] disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                Open set
+                <ArrowUpRight size={14} aria-hidden="true" />
+              </button>
+            </form>
+          )}
+        </div>
       </section>
 
       {errorMessage && (
@@ -325,7 +337,7 @@ export default function PlaysetsLibrary({
               </p>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
-              {builtIn.map((playset) => <PlaysetCard key={playset.id} playset={playset} />)}
+              {builtIn.map((playset) => <PlaysetCard key={playset.id} playset={playset} showBadge={false} />)}
             </div>
           </section>
           <section aria-labelledby="community-heading">
@@ -341,7 +353,7 @@ export default function PlaysetsLibrary({
               </div>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2">
-                {community.map((playset) => <PlaysetCard key={playset.id} playset={playset} />)}
+                {community.map((playset) => <PlaysetCard key={playset.id} playset={playset} showBadge={false} />)}
               </div>
             )}
           </section>
