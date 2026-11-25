@@ -31,6 +31,7 @@ import {
   archiveCreatorPlayset,
   createCreatorPlayset,
   creatorPlaysetAction,
+  deleteCreatorPlayset,
   fetchCreatorNotifications,
   fetchCreatorProfile,
   fetchKofiIntent,
@@ -205,7 +206,8 @@ export default function CreatorStudio() {
   const [visibility, setVisibility] = useState<PlaysetVisibility>("PUBLIC");
   const [items, setItems] = useState<ItemDraft[]>(blankRows);
 
-  const [deleteTarget, setDeleteTarget] = useState<CreatorPlaysetSummary | null>(null);
+  const [archiveTarget, setArchiveTarget] = useState<CreatorPlaysetSummary | null>(null);
+  const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<CreatorPlaysetSummary | null>(null);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [upgradeBusy, setUpgradeBusy] = useState(false);
   const [upgradeError, setUpgradeError] = useState("");
@@ -720,17 +722,39 @@ export default function CreatorStudio() {
   }
 
   async function archiveSet() {
-    if (!token || !deleteTarget) return;
+    if (!token || !archiveTarget) return;
     setBusy(true);
     clearFeedback();
     try {
-      await archiveCreatorPlayset(token, deleteTarget.id, deleteTarget.revision);
-      if (editingId === deleteTarget.id) resetEditor();
-      setMessage(`“${deleteTarget.title}” was archived and freed a slot.`);
-      setDeleteTarget(null);
+      await archiveCreatorPlayset(token, archiveTarget.id, archiveTarget.revision);
+      if (editingId === archiveTarget.id) resetEditor();
+      setMessage(`“${archiveTarget.title}” was archived and freed an active slot.`);
+      setArchiveTarget(null);
       await loadWorkspace(token);
     } catch (archiveError) {
       setError(archiveError instanceof Error ? archiveError.message : "Could not archive the playset.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteSet() {
+    if (!token || !permanentDeleteTarget) return;
+    const target = permanentDeleteTarget;
+    setBusy(true);
+    clearFeedback();
+    try {
+      const res = await deleteCreatorPlayset(token, target.id, target.revision);
+      if (editingId === target.id) resetEditor();
+      setMessage(
+        `“${target.title}” was permanently deleted${res.freedSlot ? " and freed an active slot." : "."}`,
+      );
+      setPermanentDeleteTarget(null);
+      await loadWorkspace(token);
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error ? deleteError.message : "Could not permanently delete the playset.",
+      );
     } finally {
       setBusy(false);
     }
@@ -820,10 +844,15 @@ export default function CreatorStudio() {
   if (!token) {
     return (
       <main className="relative z-10 mx-auto flex min-h-dvh max-w-3xl flex-col px-5 py-8">
-        <Link href="/" className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">
-          <ArrowLeft size={15} className="mr-2 inline" />
-          Back to game
-        </Link>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <Link href="/" className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)] hover:text-white">
+            <ArrowLeft size={15} className="mr-2 inline" />
+            Back to game
+          </Link>
+          <Link href="/pricing" className="text-xs font-bold uppercase tracking-[0.14em] text-[var(--accent-highlight)] hover:underline">
+            Plans &amp; pricing
+          </Link>
+        </div>
         <section className="mt-16 rounded-md border border-white/20 bg-[#1b1734] p-7 sm:p-10">
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--accent-highlight)]">
             Creator Studio
@@ -833,8 +862,11 @@ export default function CreatorStudio() {
           </h1>
           <p className="mt-4 max-w-xl text-sm leading-6 text-[var(--text-secondary)]">
             Create Higher or Lower sets with your own items, custom WebP images, and measurable stats.
-            Free accounts include up to 3 active playsets (50 items each). Sign in with Discord or
-            Google to start.
+            Free accounts include up to 3 active playsets (50 items each).{" "}
+            <Link href="/pricing" className="text-[var(--accent-highlight)] underline hover:brightness-110">
+              Compare plans &amp; limits
+            </Link>
+            . Sign in with Discord or Google to start.
           </p>
 
           <div className="mt-8 grid gap-3 sm:grid-cols-2">
@@ -871,6 +903,13 @@ export default function CreatorStudio() {
   const readOnly =
     editingSet?.status === "ARCHIVED" || editingSet?.moderationState === "REMOVED";
   const isPro = profile?.tier === "PRO";
+  const effectiveSlotsUsed = profile
+    ? isPro
+      ? profile.activeSlotsUsed
+      : Math.max(profile.activeSlotsUsed, profile.devicePoolSlotsUsed)
+    : 0;
+  const atSlotLimit = Boolean(profile && effectiveSlotsUsed >= profile.maxPlaysets);
+  const creatingBlockedBySlotLimit = editorMode === "create" && atSlotLimit;
   const activePublishBan = profile?.restrictions.find(
     (r) => r.type === "PUBLISH_BAN" || r.type === "SUSPENDED",
   );
@@ -889,6 +928,12 @@ export default function CreatorStudio() {
           <span className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--accent-highlight)]">
             Creator Studio
           </span>
+          <Link href="/playsets" className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)] hover:text-white">
+            Custom sets
+          </Link>
+          <Link href="/pricing" className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)] hover:text-white">
+            Plans
+          </Link>
           {profile?.isStaff && (
             <Link
               href="/admin"
@@ -1136,12 +1181,13 @@ export default function CreatorStudio() {
           <div className="flex flex-wrap items-center gap-4 text-[11px] text-[var(--text-muted)]">
             <span>
               Slots:{" "}
-              <strong className="text-white">
+              <strong className={atSlotLimit ? "text-amber-300" : "text-white"}>
                 {profile.activeSlotsUsed}/{profile.maxPlaysets}
               </strong>
               {!isPro && profile.devicePoolSlotsUsed > profile.activeSlotsUsed
                 ? ` (${profile.devicePoolSlotsUsed}/${profile.maxPlaysets} across linked free accounts on this device)`
                 : ""}
+              {atSlotLimit && <span className="ml-1.5 text-amber-300">· Limit reached</span>}
             </span>
             <span>
               Items limit: <strong className="text-white">{profile.maxItemsPerSet}/set</strong>
@@ -1149,6 +1195,12 @@ export default function CreatorStudio() {
             {isPro && (
               <span className="text-emerald-300">Ad-free unlocked · Studio analytics enabled</span>
             )}
+            <Link
+              href="/pricing"
+              className="font-bold uppercase tracking-[0.08em] text-[var(--accent-highlight)] hover:underline"
+            >
+              Plans &amp; limits
+            </Link>
           </div>
         </section>
       )}
@@ -1191,6 +1243,42 @@ export default function CreatorStudio() {
             )}
           </div>
 
+          {creatingBlockedBySlotLimit && profile && (
+            <div
+              role="status"
+              className="mt-4 rounded-sm border border-amber-400/50 bg-amber-950/35 p-4 text-xs leading-5 text-amber-100"
+            >
+              <p className="font-bold text-amber-200">
+                Active slot limit reached ({effectiveSlotsUsed}/{profile.maxPlaysets})
+              </p>
+              <p className="mt-1 text-amber-100/90">
+                {!isPro && profile.devicePoolSlotsUsed > profile.activeSlotsUsed
+                  ? `Linked free accounts on this device are using ${profile.devicePoolSlotsUsed}/${profile.maxPlaysets} active slots. `
+                  : ""}
+                Neither archived nor deleted playsets count toward your limit. Archive or permanently delete
+                a playset in <strong>Your playsets</strong> to free a slot immediately
+                {!isPro ? ", or upgrade to Creator Pro for 25 active slots." : "."}
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2.5">
+                <Link
+                  href="/pricing"
+                  className="rounded-sm border border-white/30 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-white hover:bg-white/10"
+                >
+                  View Plans &amp; Limits
+                </Link>
+                {!isPro && (
+                  <button
+                    type="button"
+                    onClick={() => void openUpgradeModal()}
+                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-sm bg-[var(--accent-highlight)] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-[#15122b] hover:brightness-110"
+                  >
+                    <Crown size={12} aria-hidden="true" />
+                    Upgrade to Pro
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           {editingSet?.moderationState === "REMOVED" && (
             <div role="alert" className="mt-4 rounded-sm border border-red-400/40 bg-red-950/35 p-3 text-xs text-red-200">
               Removed by moderation{editingSet.moderationReason ? `: ${editingSet.moderationReason}` : "."} This playset cannot be edited or republished.
@@ -1659,7 +1747,7 @@ export default function CreatorStudio() {
               <button
                 type="button"
                 className={SECONDARY}
-                disabled={busy || !canSaveDraft}
+                disabled={busy || !canSaveDraft || creatingBlockedBySlotLimit}
                 onClick={() => void saveDraft()}
               >
                 {busy ? <LoaderCircle size={15} className="animate-spin" /> : <Save size={15} />}
@@ -1668,7 +1756,7 @@ export default function CreatorStudio() {
               <button
                 type="button"
                 className={PRIMARY}
-                disabled={busy || !canPublish || !publicSettings.features.creatorPublishEnabled}
+                disabled={busy || !canPublish || !publicSettings.features.creatorPublishEnabled || creatingBlockedBySlotLimit}
                 onClick={() => void saveAndPublish()}
               >
                 {busy ? <LoaderCircle size={15} className="animate-spin" /> : <Send size={15} />}
@@ -1715,10 +1803,21 @@ export default function CreatorStudio() {
                   type="button"
                   className={SECONDARY}
                   disabled={busy}
-                  onClick={() => setDeleteTarget(editingSet)}
+                  onClick={() => setArchiveTarget(editingSet)}
                 >
                   <Archive size={14} />
                   Archive
+                </button>
+              )}
+              {editingSet.moderationState !== "REMOVED" && (
+                <button
+                  type="button"
+                  className="inline-flex min-h-10 cursor-pointer items-center gap-2 border border-red-400/40 px-3 text-xs font-bold uppercase tracking-[0.06em] text-red-200 transition hover:border-red-300 hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-45"
+                  disabled={busy}
+                  onClick={() => setPermanentDeleteTarget(editingSet)}
+                >
+                  <Trash2 size={14} />
+                  Delete
                 </button>
               )}
               {editingSet.status === "PUBLISHED" && editingSet.moderationState !== "REMOVED" && (
@@ -1737,7 +1836,8 @@ export default function CreatorStudio() {
             {loadingSets && <LoaderCircle size={15} className="animate-spin text-[var(--text-muted)]" />}
           </div>
           <p className="mt-1 text-xs text-[var(--text-muted)]">
-            Drafts, live sets, and archived sets stay here. Archiving frees a slot.
+            Drafts, live sets, and archived sets stay here. Neither archived nor deleted sets count toward
+            active slots.
           </p>
           <div className="mt-4 space-y-2.5">
             {sets.map((set) => {
@@ -1825,7 +1925,8 @@ export default function CreatorStudio() {
 
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button
-                      className="inline-flex items-center gap-1 text-[10px] font-bold uppercase text-[var(--accent-highlight)]"
+                      type="button"
+                      className="inline-flex cursor-pointer items-center gap-1 text-[10px] font-bold uppercase text-[var(--accent-highlight)]"
                       onClick={() => void openEditor(set.id)}
                     >
                       <Pencil size={12} />
@@ -1833,7 +1934,8 @@ export default function CreatorStudio() {
                     </button>
                     {set.status !== "ARCHIVED" && set.moderationState !== "REMOVED" && (
                       <button
-                        className="inline-flex items-center gap-1 text-[10px] font-bold uppercase text-[var(--text-secondary)] hover:text-white"
+                        type="button"
+                        className="inline-flex cursor-pointer items-center gap-1 text-[10px] font-bold uppercase text-[var(--text-secondary)] hover:text-white"
                         onClick={() => void togglePublished(set)}
                       >
                         {set.status === "PUBLISHED" ? (
@@ -1851,11 +1953,22 @@ export default function CreatorStudio() {
                     )}
                     {set.status !== "ARCHIVED" && set.moderationState !== "REMOVED" && (
                       <button
-                        className="inline-flex items-center gap-1 text-[10px] font-bold uppercase text-[var(--text-muted)] hover:text-red-300"
-                        onClick={() => setDeleteTarget(set)}
+                        type="button"
+                        className="inline-flex cursor-pointer items-center gap-1 text-[10px] font-bold uppercase text-[var(--text-muted)] hover:text-amber-200"
+                        onClick={() => setArchiveTarget(set)}
                       >
                         <Archive size={12} />
                         Archive
+                      </button>
+                    )}
+                    {set.moderationState !== "REMOVED" && (
+                      <button
+                        type="button"
+                        className="inline-flex cursor-pointer items-center gap-1 text-[10px] font-bold uppercase text-red-300/85 hover:text-red-200"
+                        onClick={() => setPermanentDeleteTarget(set)}
+                      >
+                        <Trash2 size={12} />
+                        Delete
                       </button>
                     )}
                     {set.status === "PUBLISHED" && set.moderationState !== "REMOVED" && (
@@ -1881,21 +1994,24 @@ export default function CreatorStudio() {
       </div>
 
       <NativeModalDialog
-        open={Boolean(deleteTarget)}
-        onClose={() => setDeleteTarget(null)}
+        open={Boolean(archiveTarget)}
+        onClose={() => setArchiveTarget(null)}
         eyebrow="Confirm Archive"
         title="Archive this playset?"
       >
         <p className="text-sm leading-6 text-[var(--text-secondary)]">
-          “{deleteTarget?.title}” will disappear from solo and multiplayer, cannot be edited afterward,
-          and will free one active creator slot.
+          “{archiveTarget?.title}” will disappear from solo and multiplayer, become read-only in your
+          library, and free 1 active creator slot.
+          {!isPro
+            ? " Free accounts can archive 1 playset every 24 hours; deleting has no cooldown."
+            : ""}
         </p>
         <div className="mt-6 flex gap-3">
           <button
             type="button"
             autoFocus
             className={`${SECONDARY} flex-1`}
-            onClick={() => setDeleteTarget(null)}
+            onClick={() => setArchiveTarget(null)}
           >
             Keep it
           </button>
@@ -1907,6 +2023,40 @@ export default function CreatorStudio() {
           >
             {busy ? <LoaderCircle size={15} className="animate-spin" /> : <Archive size={15} />}
             Archive
+          </button>
+        </div>
+      </NativeModalDialog>
+
+      <NativeModalDialog
+        open={Boolean(permanentDeleteTarget)}
+        onClose={() => setPermanentDeleteTarget(null)}
+        eyebrow="Confirm Permanent Delete"
+        title="Delete this playset permanently?"
+      >
+        <p className="text-sm leading-6 text-[var(--text-secondary)]">
+          “{permanentDeleteTarget?.title}” and all of its items and uploaded playset-only images will be
+          permanently deleted. This cannot be undone.
+          {permanentDeleteTarget?.status !== "ARCHIVED"
+            ? " Deleting it will immediately free 1 active slot."
+            : " Archived sets already do not count toward your active slot limit."}
+        </p>
+        <div className="mt-6 flex gap-3">
+          <button
+            type="button"
+            autoFocus
+            className={`${SECONDARY} flex-1`}
+            onClick={() => setPermanentDeleteTarget(null)}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="inline-flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-2 rounded-sm bg-red-600 px-4 text-xs font-bold uppercase tracking-[0.08em] text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-45"
+            disabled={busy}
+            onClick={() => void deleteSet()}
+          >
+            {busy ? <LoaderCircle size={15} className="animate-spin" /> : <Trash2 size={15} />}
+            Delete permanently
           </button>
         </div>
       </NativeModalDialog>

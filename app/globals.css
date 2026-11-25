@@ -1431,6 +1431,130 @@ dialog::backdrop {
   }
 }
 
+/* Responsive pricing/plans comparison table with sticky headers & <600px container cards */
+.pricing-table-wrapper {
+  overflow: auto;
+  max-inline-size: 100%;
+  container-type: inline-size;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0.375rem;
+  background: #17132f;
+}
+
+.pricing-table-wrapper:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.pricing-table-wrapper table {
+  border-collapse: separate;
+  border-spacing: 0;
+  inline-size: 100%;
+  text-align: left;
+  font-size: 0.9rem;
+}
+
+.pricing-table-wrapper caption {
+  padding: 0.85rem 1.1rem;
+  text-align: left;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border-block-end: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.pricing-table-wrapper thead {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 2;
+  background: #211c42;
+}
+
+.pricing-table-wrapper thead th {
+  padding: 0.8rem 1rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border-block-end: 1px solid rgba(255, 255, 255, 0.14);
+  white-space: nowrap;
+}
+
+.pricing-table-wrapper tbody th,
+.pricing-table-wrapper tbody td {
+  padding: 0.85rem 1rem;
+  border-block-end: 1px solid rgba(255, 255, 255, 0.08);
+  vertical-align: top;
+}
+
+.pricing-table-wrapper tbody th {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+  background: #17132f;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.pricing-table-wrapper tbody tr:hover td,
+.pricing-table-wrapper tbody tr:hover th {
+  background: #1d183b;
+}
+
+@container (width < 600px) {
+  .pricing-table-wrapper table,
+  .pricing-table-wrapper thead,
+  .pricing-table-wrapper tbody,
+  .pricing-table-wrapper tr,
+  .pricing-table-wrapper th,
+  .pricing-table-wrapper td {
+    display: block;
+  }
+
+  .pricing-table-wrapper thead {
+    display: none;
+  }
+
+  .pricing-table-wrapper tbody tr {
+    margin: 0.75rem;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 0.375rem;
+    background: #191536;
+  }
+
+  .pricing-table-wrapper tbody th {
+    position: sticky;
+    inset-block-start: 0;
+    z-index: 2;
+    background: #221d46;
+    border-block-end: 1px solid rgba(255, 255, 255, 0.12);
+  }
+
+  .pricing-table-wrapper tbody td {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    border-block-end: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .pricing-table-wrapper tbody td:last-child {
+    border-block-end: none;
+  }
+
+  .pricing-table-wrapper tbody td[data-label]::before {
+    content: attr(data-label) ": ";
+    flex-shrink: 0;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+}
+
 /* Single-row accessible tabs with border indicator (not color alone) */
 .admin-tablist {
   display: flex;

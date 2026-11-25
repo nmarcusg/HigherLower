@@ -316,6 +316,7 @@ export default async function PublicPlaysetGamePage({
         <footer className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4 text-[11px] text-[var(--text-muted)]">
           <span>Higher or Lower</span>
           <nav aria-label="Legal links" className="flex gap-4">
+            <Link href="/pricing" className="hover:text-white">Plans</Link>
             <Link href="/privacy" className="hover:text-white">Privacy</Link>
             <Link href="/terms" className="hover:text-white">Terms</Link>
           </nav>

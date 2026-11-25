@@ -305,6 +305,12 @@ export default function HomeSetup({ catalog }: HomeSetupProps) {
           <span>Custom sets</span>
         </Link>
         <Link
+          href="/pricing"
+          className="inline-flex min-h-11 items-center gap-2 border border-transparent px-3 text-xs text-[var(--foreground-muted)] transition-colors hover:bg-white/10 hover:text-white focus-visible:border-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring)]"
+        >
+          <span>Plans</span>
+        </Link>
+        <Link
           href="/multiplayer"
           className="inline-flex min-h-11 items-center gap-2 border border-transparent px-3 text-xs text-[var(--foreground-muted)] transition-colors hover:bg-white/10 hover:text-white focus-visible:border-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring)]"
         >
@@ -482,6 +488,9 @@ export default function HomeSetup({ catalog }: HomeSetupProps) {
         <nav aria-label="Legal links" className="flex flex-wrap items-center gap-4">
           <Link href="/playsets" className="hover:text-white">
             Playsets
+          </Link>
+          <Link href="/pricing" className="hover:text-white">
+            Plans
           </Link>
           <Link href="/privacy" className="hover:text-white">
             Privacy

@@ -52,10 +52,18 @@ export default async function PublicPlaysetsPage({
   return (
     <div className="ui-scale-120">
       <main className="relative z-10 mx-auto flex min-h-dvh w-full max-w-5xl flex-col px-5 py-6 sm:px-8 sm:py-10">
-      <header>
+      <header className="flex flex-wrap items-center justify-between gap-4">
         <Link href="/" className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-[var(--text-secondary)] transition hover:text-white">
           <ArrowLeft size={16} /> Back to game
         </Link>
+        <nav aria-label="Custom sets navigation" className="flex flex-wrap items-center gap-3 text-xs font-bold uppercase tracking-[0.12em]">
+          <Link href="/studio" className="text-[var(--text-secondary)] transition hover:text-white">
+            Create
+          </Link>
+          <Link href="/pricing" className="text-[var(--accent-highlight)] transition hover:underline">
+            Plans &amp; pricing
+          </Link>
+        </nav>
       </header>
       <section className="mx-auto w-full max-w-4xl flex-1 py-12 sm:py-16">
         <div className="mb-10 text-center">
@@ -80,6 +88,7 @@ export default async function PublicPlaysetsPage({
       <footer className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4 text-[11px] text-[var(--text-muted)]">
         <span>Higher or Lower · Playset Library</span>
         <nav aria-label="Legal links" className="flex gap-4">
+          <Link href="/pricing" className="hover:text-white">Plans</Link>
           <Link href="/privacy" className="hover:text-white">Privacy</Link>
           <Link href="/terms" className="hover:text-white">Terms</Link>
         </nav>

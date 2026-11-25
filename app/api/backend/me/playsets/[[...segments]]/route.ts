@@ -15,6 +15,7 @@ async function proxy(request: Request, context: { params: Promise<{ segments?: s
     return Response.json({ message: "Sign in to manage your playsets." }, { status: 401 });
   }
   if (request.method === "PUT" && (!id || action)) return Response.json({ message: "Invalid creator endpoint." }, { status: 404 });
+  if (request.method === "DELETE" && (!id || action)) return Response.json({ message: "Invalid creator endpoint." }, { status: 404 });
   if (request.method === "GET" && action) return Response.json({ message: "Method not allowed." }, { status: 405 });
   if (request.method === "POST" && id && !action) return Response.json({ message: "Method not allowed." }, { status: 405 });
 
@@ -24,7 +25,7 @@ async function proxy(request: Request, context: { params: Promise<{ segments?: s
   const deviceId = request.headers.get("x-device-id");
   if (deviceId) headers.set("X-Device-Id", deviceId);
   let body: string | undefined;
-  if (request.method !== "GET") {
+  if (request.method !== "GET" && request.method !== "DELETE") {
     headers.set("Content-Type", "application/json");
     body = await request.text();
   }
@@ -39,3 +40,4 @@ async function proxy(request: Request, context: { params: Promise<{ segments?: s
 export const GET = proxy;
 export const POST = proxy;
 export const PUT = proxy;
+export const DELETE = proxy;

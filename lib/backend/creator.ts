@@ -139,7 +139,7 @@ function deviceHeaders(): Record<string, string> {
 async function creatorApiRequest<T>(
   url: string,
   token: string,
-  method: "GET" | "POST" | "PUT" | "PATCH" = "GET",
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" = "GET",
   body?: unknown,
 ): Promise<T> {
   const response = await fetch(url, {
@@ -162,7 +162,7 @@ async function creatorApiRequest<T>(
   return payload as T;
 }
 
-function creatorRequest<T>(token: string, path = "", method: "GET" | "POST" | "PUT" = "GET", body?: unknown): Promise<T> {
+function creatorRequest<T>(token: string, path = "", method: "GET" | "POST" | "PUT" | "DELETE" = "GET", body?: unknown): Promise<T> {
   return creatorApiRequest<T>(`/api/backend/me/playsets${path}`, token, method, body);
 }
 
@@ -301,4 +301,13 @@ export function creatorPlaysetAction(token: string, id: string, action: "publish
 
 export function archiveCreatorPlayset(token: string, id: string, expectedRevision: number): Promise<CreatorPlayset> {
   return creatorPlaysetAction(token, id, "archive", expectedRevision);
+}
+
+export function deleteCreatorPlayset(
+  token: string,
+  id: string,
+  expectedRevision?: number,
+): Promise<{ deleted: true; id: string; freedSlot: boolean }> {
+  const query = expectedRevision !== undefined ? `?expectedRevision=${expectedRevision}` : "";
+  return creatorRequest(token, `/${encodeURIComponent(id)}${query}`, "DELETE");
 }
